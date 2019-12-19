@@ -1,0 +1,87 @@
+<settings>
+    <!--
+    <proxies>
+        <proxy>
+            <id>nav-proxy</id>
+            <active>true</active>
+            <protocol>http</protocol>
+            <host>webproxy-utvikler.nav.no</host>
+            <port>8088</port>
+            <nonProxyHosts>*.adeo.no</nonProxyHosts>
+        </proxy>
+    </proxies>
+    -->
+
+    <localRepository>tmp</localRepository>
+
+    <mirrors>
+        <mirror>
+            <id>github</id>
+            <mirrorOf>github</mirrorOf>
+            <url>http://localhost:8080/tjenestespesifikasjoner</url>
+        </mirror>
+    </mirrors>
+    <servers>
+        <server>
+            <id>github</id>
+            <username>foo</username>
+            <password>bar</password>
+        </server>
+    </servers>
+
+    <profiles>
+        <profile>
+            <id>internal-repo</id>
+            <activation>
+                <activeByDefault>true</activeByDefault>
+            </activation>
+            <repositories>
+                <!--
+                <repository>
+                    <id>nexus-internal</id>
+                    <name>NAV internal Nexus</name>
+                    <url>https://repo.adeo.no/repository/maven-public</url>
+                    <releases><enabled>true</enabled></releases>
+                </repository>
+                -->
+                <!--
+                <repository>
+                    <id>nexus-internal-snapshots</id>
+                    <name>NAV internal Nexus snapshots</name>
+                    <url>https://repo.adeo.no/repository/maven-snapshots</url>
+                    <snapshots><enabled>true</enabled></snapshots>
+                </repository>
+                -->
+                <!--
+                <repository>
+                    <id>nexus-nordkorea</id>
+                    <name>nexus-nordkorea</name>
+                    <url>http://maven.adeo.no/nexus/content/groups/public</url>
+                </repository>
+                <repository>
+                    <id>nexus-nordkorea-snapshots</id>
+                    <name>nexus-nordkorea snapshots</name>
+                    <url>http://maven.adeo.no/nexus/content/groups/public-snapshots</url>
+                </repository>
+                -->
+            </repositories>
+
+            <pluginRepositories>
+                <!--
+                <pluginRepository>
+                    <id>nexus-internal</id>
+                    <name>NAV internal Nexus</name>
+                    <url>https://repo.adeo.no/repository/maven-public</url>
+                </pluginRepository>
+                -->
+                <!--
+                <pluginRepository>
+                    <id>nexus-nordkorea</id>
+                    <name>nexus-nordkorea</name>
+                    <url>http://maven.adeo.no/nexus/content/groups/public</url>
+                </pluginRepository>
+                -->
+            </pluginRepositories>
+        </profile>
+    </profiles>
+</settings>
