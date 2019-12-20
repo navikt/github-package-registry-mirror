@@ -4,7 +4,7 @@ const fetch = require('node-fetch');
 const app = express();
 
 app.get('/', (req, res) => {
-    res.send('Dette er et mirror for Github Package Registry. Work in progress.');
+    res.send('Dette er et mirror for Github Package Registry. Work in progress...');
 });
 
 app.get('/favicon.ico', (req, res) => res.status(404).end());
