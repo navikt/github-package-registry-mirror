@@ -1,10 +1,27 @@
 const express = require('express');
 const fetch = require('node-fetch');
+const { Storage } = require('@google-cloud/storage');
+
+// Creates a Cloud Storage client
+const storage = new Storage();
+
+storage.bucket()
 
 const app = express();
 
 app.get('/', (req, res) => {
     res.send('Dette er et mirror for Github Package Registry. Work in progress...');
+});
+
+app.get('/dummy', async (req, res) => {
+    try {
+        console.log('reading dummy secret');
+        const file = await storage.bucket('github-package-registry-mirror-storage').file('credentials/dummy-token').download();
+        res.status(200).send(JSON.stringify(file));
+    } catch (err) {
+        console.error('Unexpected error', err);
+        res.status(500).send('Server error');
+    }
 });
 
 app.get('/favicon.ico', (req, res) => res.status(404).end());
