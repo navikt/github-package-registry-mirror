@@ -44,6 +44,8 @@ app.get('*', async (req, res) => {
         } else if (response.status === 404) {
             console.info('Got 404 from Github Package Registry');
             res.status(400).send('404 Not Found: Looks like this package doesn\'t on Github Package Registry.');
+        } else if (response.status === 422 && (await response.text()) === 'Invalid path for maven file') {
+            res.status(422).send('422: Invalid path for maven file');
         } else {
             res.status(500).send(`Got an unexpected response from Github Package Registry ${resolved}`);
             console.error(`Got unexpected response ${response.status} from Github Package Registry: ` + await response.text());
