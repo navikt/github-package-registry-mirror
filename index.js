@@ -11,10 +11,21 @@ app.get('/', (req, res) => {
     res.send('Dette er et mirror for Github Package Registry. Work in progress...');
 });
 
+function streamToString (stream) {
+    const chunks = []
+    return new Promise((resolve, reject) => {
+        stream.on('data', chunk => chunks.push(chunk))
+        stream.on('error', reject)
+        stream.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
+    })
+}
+
+
 app.get('/dummy', async (req, res) => {
     try {
         console.log('reading dummy secret');
-        const file = await storage.bucket('github-package-registry-mirror-storage').file('credentials/dummy-token').download();
+        const stream = await storage.bucket('github-package-registry-mirror-storage').file('credentials/dummy-token').createReadStream();
+        const file = await streamToString(stream);
         res.status(200).send(JSON.stringify(file));
     } catch (err) {
         console.error('Unexpected error', err);
