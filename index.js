@@ -2,9 +2,6 @@ const express = require('express');
 const fetch = require('node-fetch');
 const { Storage } = require('@google-cloud/storage');
 
-// Creates a Cloud Storage client
-const storage = new Storage();
-
 const app = express();
 
 app.get('/', (req, res) => {
@@ -14,19 +11,24 @@ app.get('/', (req, res) => {
 function streamToString (stream) {
     const chunks = []
     return new Promise((resolve, reject) => {
-        stream.on('data', chunk => chunks.push(chunk))
-        stream.on('error', reject)
-        stream.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
-    })
+        stream.on('data', chunk => chunks.push(chunk));
+        stream.on('error', reject);
+        stream.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    });
 }
 
+const storage = new Storage();
+async function getToken(tokenName) {
+    const stream = await storage.bucket('github-package-registry-mirror-storage').file('credentials/' + tokenName).createReadStream();
+    const data = await streamToString(stream);
+    return data.trim();
+}
 
 app.get('/dummy', async (req, res) => {
     try {
         console.log('reading dummy secret');
-        const stream = await storage.bucket('github-package-registry-mirror-storage').file('credentials/dummy-token').createReadStream();
-        const file = await streamToString(stream);
-        res.status(200).send(JSON.stringify(file));
+        const secret = await getToken('dummy-token');
+        res.status(200).send(secret);
     } catch (err) {
         console.error('Unexpected error', err);
         res.status(500).send('Server error');
@@ -44,7 +46,7 @@ app.get('*', async (req, res) => {
         const resolved = 'https://maven.pkg.github.com/navikt' + req.originalUrl;
 
         const username = 'token';
-        const password = process.env.GITHUB_TOKEN;
+        const password = await getToken('github-token');
 
         const modifiedHeaders = {
             ...req.headers,
