@@ -5,8 +5,6 @@ const { Storage } = require('@google-cloud/storage');
 // Creates a Cloud Storage client
 const storage = new Storage();
 
-storage.bucket()
-
 const app = express();
 
 app.get('/', (req, res) => {
