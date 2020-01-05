@@ -1,9 +1,23 @@
+const fs = require('fs');
 const express = require('express');
 const fetch = require('node-fetch');
 const { Storage } = require('@google-cloud/storage');
 
 function tokenAuthHeader(token) {
     return 'Basic ' + Buffer.from("token:" + token).toString('base64');
+}
+
+function localFileExists(filePath) {
+    return new Promise((resolve, reject) => {
+        fs.access(filePath, fs.F_OK, (err) => {
+            if (err) {
+                // file does not exist
+                resolve(false);
+            }
+            //file exists
+            resolve(true);
+        })
+    });
 }
 
 async function getRepoStatus(name, token) {
@@ -37,53 +51,41 @@ function streamToString (stream) {
     });
 }
 
-const app = express();
-
-app.get('/', (req, res) => {
-    res.send('Dette er et mirror for Github Package Registry. Work in progress...');
-});
-
 const storage = new Storage();
 async function getToken(tokenName) {
-    const stream = await storage.bucket('github-package-registry-mirror-storage').file('credentials/' + tokenName).createReadStream();
-    const data = await streamToString(stream);
-    return data.trim();
+    if (await localFileExists('github-token')) {
+        return fs.readFileSync('github-token').trim();
+    } else {
+        const stream = await storage.bucket('github-package-registry-mirror-storage').file('credentials/' + tokenName).createReadStream();
+        const data = await streamToString(stream);
+        return data.trim();
+    }
 }
 
-app.get('/dummy', async (req, res) => {
-    try {
-        console.log('reading dummy secret');
-        const secret = await getToken('dummy-token');
-        res.status(200).send(secret);
-    } catch (err) {
-        console.error('Unexpected error', err);
-        res.status(500).send('Server error');
-    }
-});
+function modifiedHeadersWithAuth(headers, token) {
+    const modifiedHeaders = {
+        ...headers,
+        authorization: tokenAuthHeader(token)
+    };
+    delete modifiedHeaders.host;
+    return modifiedHeaders;
+}
 
-app.get('/favicon.ico', (req, res) => res.status(404).end());
-
-app.get('/:repo/*', async (req, res) => {
+async function handleSimple(req, res, repo, path) {
     try {
         const token = await getToken('github-token');
 
-        const repoStatus = await getRepoStatus(req.params.repo, token);
+        const repoStatus = await getRepoStatus(repo, token);
         if (repoStatus.error) {
             console.error('Could not read repo metadata', repoStatus.error);
-            res.status(404).send(`Kunne ikke hente metadata for Github-repoet "${req.params.repo}" under navikt-organisasjonen - det kan hende det ikke finnes, eller at det er privat?`);
+            res.status(404).send(`Kunne ikke hente metadata for Github-repoet "${repo}" under navikt-organisasjonen - det kan hende det ikke finnes, eller at det er privat?`);
             return;
         }
 
-        const modifiedHeaders = {
-            ...req.headers,
-            authorization: tokenAuthHeader(token)
-        };
-        delete modifiedHeaders.host;
-
-        const resolvedGithubPath = 'https://maven.pkg.github.com/navikt' + req.originalUrl;
+        const resolvedGithubPath = 'https://maven.pkg.github.com/navikt/' + repo + '/' + path;
 
         const response = await fetch(resolvedGithubPath, {
-            headers: modifiedHeaders,
+            headers: modifiedHeadersWithAuth(req.headers, token),
             redirect: 'manual'
         });
 
@@ -110,6 +112,75 @@ app.get('/:repo/*', async (req, res) => {
         console.error('Unexpected error', err);
         res.status(500).send('Server error');
     }
+}
+
+async function handleCached(req, res, repo, path) {
+    try {
+        const exists = await storage.bucket('github-package-registry-mirror-storage').file('cache/' + repo + '/' + path).exists();
+        if (!exists) {
+            const token = await getToken('github-token');
+
+            const repoStatus = await getRepoStatus(repo, token);
+            if (repoStatus.error) {
+                console.error('Could not read repo metadata', repoStatus.error);
+                res.status(404).send(`Kunne ikke hente metadata for Github-repoet "${repo}" under navikt-organisasjonen - det kan hende det ikke finnes, eller at det er privat?`);
+                return;
+            }
+
+            const resolvedGithubPath = 'https://maven.pkg.github.com/navikt/' + repo + '/' + path;
+
+            const response = await fetch(resolvedGithubPath, {
+                headers: modifiedHeadersWithAuth(req.headers, token)
+            });
+
+            if (response.status === 200) {
+                const readStream = response.getReader();
+                const writeStream = storage.bucket('github-package-registry-mirror-storage').file('cache/' + repo + '/' + path).createWriteStream();
+                await readStream.pipeTo(writeStream);
+            }
+        }
+        await storage.bucket('github-package-registry-mirror-storage').file('cache/' + repo + '/' + path).createReadStream().pipeTo(res);
+    } catch (err) {
+        console.error('Unexpected error', err);
+        res.status(500).send('Server error');
+    }
+}
+
+const app = express();
+
+app.get('/dummy', async (req, res) => {
+    try {
+        console.log('reading dummy secret');
+        const secret = await getToken('dummy-token');
+        res.status(200).send(secret);
+    } catch (err) {
+        console.error('Unexpected error', err);
+        res.status(500).send('Server error');
+    }
+});
+
+app.get('/', (req, res) => {
+    res.send('Dette er et mirror for Github Package Registry. Work in progress...');
+});
+
+app.get('/favicon.ico', (req, res) => res.status(404).end());
+
+app.get('/simple/:repo/*', (req, res) => {
+    const repo = req.params.repo;
+    const path = req.params[0];
+    return handleSimple(req, res, repo, path);
+});
+
+app.get('/cached/:repo/*', (req, res) => {
+    const repo = req.params.repo;
+    const path = req.params[0];
+    return handleCached(req, res, repo, path);
+});
+
+app.get('/:repo/*', async (req, res) => {
+    const repo = req.params.repo;
+    const path = req.params[0];
+    return handleSimple(req, res, repo, path);
 });
 
 const port = 8080;
