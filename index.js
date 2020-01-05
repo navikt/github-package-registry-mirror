@@ -135,11 +135,28 @@ async function handleCached(req, res, repo, path) {
 
             if (response.status === 200) {
                 const readStream = response.getReader();
-                const writeStream = storage.bucket('github-package-registry-mirror-storage').file('cache/' + repo + '/' + path).createWriteStream();
+                const writeStream = await storage.bucket('github-package-registry-mirror-storage').file('cache/' + repo + '/' + path).createWriteStream();
                 await readStream.pipeTo(writeStream);
+            } else if (response.status === 400) {
+                res.status(500).send('500 Server error: Could not authenticate with the Github Package Registry. This is probably due to a misconfiguration in Github Package Registry Mirror, and not your fault.');
+                console.error('Got status 400 from the server: ' + await response.text());
+                return;
+            } else if (response.status === 404) {
+                console.info('Got 404 from Github Package Registry');
+                res.status(400).send('404 Not Found: Looks like this package doesn\'t on Github Package Registry.');
+                return;
+            } else if (response.status === 422) {
+                res.status(422).send('422: The file path you provided was probably invalid (not a valid Maven repository path)');
+                return;
+            } else {
+                res.status(500).send(`Got an unexpected response from Github Package Registry ${resolvedGithubPath}`);
+                console.error(`Got unexpected response ${response.status} from Github Package Registry: ` + await response.text());
+                return;
             }
         }
-        await storage.bucket('github-package-registry-mirror-storage').file('cache/' + repo + '/' + path).createReadStream().pipeTo(res);
+
+        const readStream =  await storage.bucket('github-package-registry-mirror-storage').file('cache/' + repo + '/' + path).createReadStream();
+        await readStream.pipeTo(res);
     } catch (err) {
         console.error('Unexpected error', err);
         res.status(500).send('Server error');
