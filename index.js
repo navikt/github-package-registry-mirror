@@ -116,9 +116,19 @@ async function handleSimple(req, res, repo, path) {
 
 async function handleCached(req, res, repo, path) {
     try {
+        console.log(`Handle cached artifact, repo ${repo}, path ${path}`);
         const file = 'cache/' + repo + '/' + path;
-        const exists = await storage.bucket('github-package-registry-mirror-storage').file(file).exists();
-        console.log(`Does the file ${file} exist?`, exists);
+
+        let exists;
+        try {
+            console.log(`Checking Cloud Storage for file ${file}`);
+            exists = await storage.bucket('github-package-registry-mirror-storage').file(file).exists();
+            console.log(`Does the file ${file} exist?`, exists);
+        } catch (error) {
+            console.error('Could not check if the file existed', error);
+            throw error;
+        }
+
         if (!exists) {
             const token = await getToken('github-token');
 
