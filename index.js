@@ -116,7 +116,9 @@ async function handleSimple(req, res, repo, path) {
 
 async function handleCached(req, res, repo, path) {
     try {
-        const exists = await storage.bucket('github-package-registry-mirror-storage').file('cache/' + repo + '/' + path).exists();
+        const file = 'cache/' + repo + '/' + path;
+        const exists = await storage.bucket('github-package-registry-mirror-storage').file(file).exists();
+        console.log(`Does the file ${file} exist?`, exists);
         if (!exists) {
             const token = await getToken('github-token');
 
@@ -132,6 +134,8 @@ async function handleCached(req, res, repo, path) {
             const response = await fetch(resolvedGithubPath, {
                 headers: modifiedHeadersWithAuth(req.headers, token)
             });
+
+            console.log(`Fetched from ${resolvedGithubPath}, status code was ${response.status}`);
 
             if (response.status === 200) {
                 const readStream = response.getReader();
