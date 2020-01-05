@@ -2,20 +2,46 @@ const express = require('express');
 const fetch = require('node-fetch');
 const { Storage } = require('@google-cloud/storage');
 
-const app = express();
+function tokenAuthHeader(token) {
+    return 'Basic ' + Buffer.from("token:" + token).toString('base64');
+}
 
-app.get('/', (req, res) => {
-    res.send('Dette er et mirror for Github Package Registry. Work in progress...');
-});
+async function getRepoStatus(name, token) {
+    const repo = await fetch('https://api.github.com/repos/navikt/' + encodeURIComponent(name), {
+        headers: {
+            authorization: tokenAuthHeader(token)
+        }
+    });
+    const data = await repo.json();
+    if (repo.status === 404) {
+        return {
+            error: 'REPO_NOT_FOUND'
+        };
+    }
+    if (data.private) {
+        return {
+            error: 'REPO_IS_PRIVATE'
+        };
+    }
+    return {
+        message: 'OK'
+    };
+}
 
 function streamToString (stream) {
-    const chunks = []
+    const chunks = [];
     return new Promise((resolve, reject) => {
         stream.on('data', chunk => chunks.push(chunk));
         stream.on('error', reject);
         stream.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
     });
 }
+
+const app = express();
+
+app.get('/', (req, res) => {
+    res.send('Dette er et mirror for Github Package Registry. Work in progress...');
+});
 
 const storage = new Storage();
 async function getToken(tokenName) {
@@ -37,24 +63,26 @@ app.get('/dummy', async (req, res) => {
 
 app.get('/favicon.ico', (req, res) => res.status(404).end());
 
-app.get('*', async (req, res) => {
+app.get('/:repo/*', async (req, res) => {
     try {
-        if (!req.originalUrl.startsWith('/tjenestespesifikasjoner/')) {
-            res.status(400).send('Ugyldig pakke: kun tjenestespesifikasjoner er whitelistet til bruk i mirroret hittil.');
+        const token = await getToken('github-token');
+
+        const repoStatus = await getRepoStatus(req.params.repo, token);
+        if (repoStatus.error) {
+            console.error('Could not read repo metadata', repoStatus.error);
+            res.status(404).send(`Kunne ikke hente metadata for Github-repoet "${req.params.repo}" under navikt-organisasjonen - det kan hende det ikke finnes, eller at det er privat?`);
             return;
         }
-        const resolved = 'https://maven.pkg.github.com/navikt' + req.originalUrl;
-
-        const username = 'token';
-        const password = await getToken('github-token');
 
         const modifiedHeaders = {
             ...req.headers,
-            authorization: 'Basic ' + Buffer.from(username + ":" + password).toString('base64')
+            authorization: tokenAuthHeader(token)
         };
         delete modifiedHeaders.host;
 
-        const response = await fetch(resolved, {
+        const resolvedGithubPath = 'https://maven.pkg.github.com/navikt' + req.originalUrl;
+
+        const response = await fetch(resolvedGithubPath, {
             headers: modifiedHeaders,
             redirect: 'manual'
         });
@@ -75,15 +103,13 @@ app.get('*', async (req, res) => {
         } else if (response.status === 422) {
             res.status(422).send('422: The file path you provided was probably invalid (not a valid Maven repository path)');
         } else {
-            res.status(500).send(`Got an unexpected response from Github Package Registry ${resolved}`);
+            res.status(500).send(`Got an unexpected response from Github Package Registry ${resolvedGithubPath}`);
             console.error(`Got unexpected response ${response.status} from Github Package Registry: ` + await response.text());
         }
     } catch (err) {
         console.error('Unexpected error', err);
         res.status(500).send('Server error');
     }
-
-
 });
 
 const port = 8080;
