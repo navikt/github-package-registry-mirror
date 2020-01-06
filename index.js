@@ -52,10 +52,21 @@ function streamToString (stream) {
     });
 }
 
+function waitForStreamToEnd(stream) {
+    console.log('waiting for stream to end...');
+    return new Promise((resolve, reject) => {
+        stream.on('error', reject);
+        stream.on('finish', () => {
+            console.log('stream finished.');
+            resolve();
+        });
+    });
+}
+
 const storage = new Storage();
 async function getToken(tokenName) {
     if (await localFileExists('github-token')) {
-        return fs.readFileSync('github-token').trim();
+        return fs.readFileSync('github-token', 'utf-8').trim();
     } else {
         const stream = await storage.bucket('github-package-registry-mirror-storage').file('credentials/' + tokenName).createReadStream();
         const data = await streamToString(stream);
@@ -145,15 +156,39 @@ async function handleCached(req, res, repo, path) {
 
             const response = await fetch(resolvedGithubPath, {
                 headers: modifiedHeadersWithAuth(req.headers, token),
-                credentials: 'same-origin'
+                credentials: 'same-origin',
+                redirect: 'manual'
             });
 
             console.log(`Fetched from ${resolvedGithubPath}, status code was ${response.status}`);
 
-            if (response.status === 200) {
-                const readStream = response.getReader();
+            if (response.status === 301) {
+                const location = response.headers.get('location');
+                console.log(`Fetching artifact from ${location}`);
+                const artifactResponse = await fetch(location);
+
+                if (artifactResponse.status !== 200) {
+                    console.error(`artifact response failed with status code ${artifactResponse.status}`);
+                    res.status(500).send('Could not fetch the artifact from Github Package Registry.');
+                    return;
+                }
+
+                const readStream = artifactResponse.body;
                 const writeStream = await storage.bucket('github-package-registry-mirror-storage').file('cache/' + repo + '/' + path).createWriteStream();
-                await readStream.pipe(writeStream);
+                readStream.pipe(writeStream);
+                readStream.pipe(res);
+
+                await waitForStreamToEnd(writeStream);
+                console.log('stored the response in the bucket.');
+                return;
+            } else if (response.status === 200) {
+                const readStream = response.body;
+                const writeStream = await storage.bucket('github-package-registry-mirror-storage').file('cache/' + repo + '/' + path).createWriteStream();
+                readStream.pipe(writeStream);
+                readStream.pipe(res);
+                await waitForStreamToEnd(writeStream);
+                console.log('stored the response in the bucket.');
+                return;
             } else if (response.status === 400) {
                 res.status(500).send('500 Server error: Could not authenticate with the Github Package Registry. This is probably due to a misconfiguration in Github Package Registry Mirror, and not your fault.');
                 console.error('Got status 400 from the server: ' + await response.text());
@@ -172,7 +207,7 @@ async function handleCached(req, res, repo, path) {
             }
         }
 
-        const readStream =  await storage.bucket('github-package-registry-mirror-storage').file('cache/' + repo + '/' + path).createReadStream();
+        const readStream = await storage.bucket('github-package-registry-mirror-storage').file('cache/' + repo + '/' + path).createReadStream();
         await readStream.pipe(res);
     } catch (err) {
         console.error('Unexpected error', err);
