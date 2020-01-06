@@ -24,7 +24,8 @@ async function getRepoStatus(name, token) {
     const repo = await fetch('https://api.github.com/repos/navikt/' + encodeURIComponent(name), {
         headers: {
             authorization: tokenAuthHeader(token)
-        }
+        },
+        credentials: 'same-origin'
     });
     const data = await repo.json();
     if (repo.status === 404) {
@@ -86,6 +87,7 @@ async function handleSimple(req, res, repo, path) {
 
         const response = await fetch(resolvedGithubPath, {
             headers: modifiedHeadersWithAuth(req.headers, token),
+            credentials: 'same-origin',
             redirect: 'manual'
         });
 
@@ -142,7 +144,8 @@ async function handleCached(req, res, repo, path) {
             const resolvedGithubPath = 'https://maven.pkg.github.com/navikt/' + repo + '/' + path;
 
             const response = await fetch(resolvedGithubPath, {
-                headers: modifiedHeadersWithAuth(req.headers, token)
+                headers: modifiedHeadersWithAuth(req.headers, token),
+                credentials: 'same-origin'
             });
 
             console.log(`Fetched from ${resolvedGithubPath}, status code was ${response.status}`);
