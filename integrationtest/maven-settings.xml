@@ -18,7 +18,8 @@
         <mirror>
             <id>github</id>
             <mirrorOf>github</mirrorOf>
-            <url>http://localhost:8080/tjenestespesifikasjoner</url>
+            <!-- <url>http://localhost:8080/tjenestespesifikasjoner</url> -->
+            <url>https://github-package-registry-mirror-sr4qwz23da-ew.a.run.app/cached/tjenestespesifikasjoner</url>
         </mirror>
     </mirrors>
     <servers>

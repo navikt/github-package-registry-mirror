@@ -1,13 +1,13 @@
 {
+  "private": true,
   "name": "github-package-registry-mirror",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "author": "",
-  "license": "ISC",
+  "author": "NAV (Arbeids- og velferdsdirektoratet) - The Norwegian Labour and Welfare Administration",
+  "license": "MIT",
   "dependencies": {
     "@google-cloud/storage": "^4.2.0",
     "express": "^4.17.1",
