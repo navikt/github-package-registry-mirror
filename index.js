@@ -122,7 +122,7 @@ async function handleCached(req, res, repo, path) {
         let exists;
         try {
             console.log(`Checking Cloud Storage for file ${file}`);
-            exists = await storage.bucket('github-package-registry-mirror-storage').file(file).exists();
+            exists = (await storage.bucket('github-package-registry-mirror-storage').file(file).exists())[0];
             console.log(`Does the file ${file} exist?`, exists);
         } catch (error) {
             console.error('Could not check if the file existed', error);
