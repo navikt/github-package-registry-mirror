@@ -102,8 +102,6 @@ async function isPackagePublic(path, token) {
 
     const result = await response.json();
 
-    console.log('graphql result', JSON.stringify(result, null, '  '));
-
     if (result.data.organization.packages.nodes.length === 0) {
         return {
             error: 'PACKAGE_NOT_FOUND',
