@@ -20,29 +20,6 @@ function localFileExists(filePath) {
     });
 }
 
-async function getRepoStatus(name, token) {
-    const repo = await fetch('https://api.github.com/repos/navikt/' + encodeURIComponent(name), {
-        headers: {
-            authorization: tokenAuthHeader(token)
-        },
-        credentials: 'same-origin'
-    });
-    const data = await repo.json();
-    if (repo.status === 404) {
-        return {
-            error: 'REPO_NOT_FOUND'
-        };
-    }
-    if (data.private) {
-        return {
-            error: 'REPO_IS_PRIVATE'
-        };
-    }
-    return {
-        message: 'OK'
-    };
-}
-
 function streamToString (stream) {
     const chunks = [];
     return new Promise((resolve, reject) => {
@@ -83,14 +60,73 @@ function modifiedHeadersWithAuth(headers, token) {
     return modifiedHeaders;
 }
 
+function parsePathAsArtifact(path) {
+    if (path.length < 4) {
+        throw new Error(`The path ${path} is not a valid Maven repository path.`);
+    }
+    const splitted = path.split('/');
+    const file = splitted[splitted.length - 1];
+    const version = splitted[splitted.length - 2];
+    const artifactId = splitted[splitted.length - 3];
+    const groupId = splitted.splice(0, splitted.length - 3).join('.');
+    return { groupId, artifactId, version, file };
+}
+
+async function isPackagePublic(path, token) {
+    const parsed = parsePathAsArtifact(path);
+    const packageName = parsed.groupId + '.' + parsed.artifactId;
+    const query = `
+        query {
+            organization(login:"navikt") {
+                packages(first: 1, names: [${JSON.stringify(packageName)}]) {
+                    nodes {
+                      repository {
+                        isPrivate
+                      }
+                    }
+                }
+            }
+        }
+    `;
+
+    const response = await fetch('https://api.github.com/graphql', {
+        method: 'post',
+        headers: {
+            authorization: 'bearer ' + token,
+            Accept: 'application/vnd.github.packages-preview+json'
+        },
+        body: JSON.stringify({
+            query
+        })
+    });
+
+    const result = await response.json();
+
+    console.log('graphql result', JSON.stringify(result, null, '  '));
+
+    if (result.data.organization.packages.nodes.length === 0) {
+        return {
+            error: 'PACKAGE_NOT_FOUND',
+            result: false
+        };
+    }
+
+    return {
+        result: !result.data.organization.packages.nodes[0].repository.isPrivate
+    };
+}
+
 async function handleSimple(req, res, repo, path) {
     try {
         const token = await getToken('github-token');
 
-        const repoStatus = await getRepoStatus(repo, token);
-        if (repoStatus.error) {
-            console.error('Could not read repo metadata', repoStatus.error);
-            res.status(404).send(`Kunne ikke hente metadata for Github-repoet "${repo}" under navikt-organisasjonen - det kan hende det ikke finnes, eller at det er privat?`);
+        const isPackagePublicStatus = await isPackagePublic(path, token);
+
+        if (!isPackagePublicStatus.result) {
+            if (isPackagePublicStatus.error) {
+                console.error(`Could not get package visibility status`, isPackagePublicStatus.error);
+            }
+            res.status(404).send(`Could not get metadata for the Github repo "${repo}" in the navikt organization - it may not exist, or perhaps it's a private repository?`);
             return;
         }
 
@@ -110,7 +146,7 @@ async function handleSimple(req, res, repo, path) {
             response.body.on('end', () => res.end());
             response.body.pipe(res);
         } else if (response.status === 400) {
-            res.status(500).send('500 Server error: Could not authenticate with the Github Package Registry. This is probably due to a misconfiguration in Github Package Registry Mirror, and not your fault.');
+            res.status(500).send('500 Server error: Could not authenticate with the Github Package Registry. This is probably due to a misconfiguration in Github Package Registry Mirror.');
             console.error('Got status 400 from the server: ' + await response.text());
         } else if (response.status === 404) {
             console.info('Got 404 from Github Package Registry');
@@ -145,10 +181,13 @@ async function handleCached(req, res, repo, path) {
         if (!exists) {
             const token = await getToken('github-token');
 
-            const repoStatus = await getRepoStatus(repo, token);
-            if (repoStatus.error) {
-                console.error('Could not read repo metadata', repoStatus.error);
-                res.status(404).send(`Kunne ikke hente metadata for Github-repoet "${repo}" under navikt-organisasjonen - det kan hende det ikke finnes, eller at det er privat?`);
+            const isPackagePublicStatus = await isPackagePublic(path, token);
+
+            if (!isPackagePublicStatus.result) {
+                if (isPackagePublicStatus.error) {
+                    console.error(`Could not get package visibility status`, isPackagePublicStatus.error);
+                }
+                res.status(404).send(`Could not get metadata for the Github repo "${repo}" in the navikt organization - it may not exist, or perhaps it's a private repository?`);
                 return;
             }
 
@@ -190,7 +229,7 @@ async function handleCached(req, res, repo, path) {
                 console.log('stored the response in the bucket.');
                 return;
             } else if (response.status === 400) {
-                res.status(500).send('500 Server error: Could not authenticate with the Github Package Registry. This is probably due to a misconfiguration in Github Package Registry Mirror, and not your fault.');
+                res.status(500).send('500 Server error: Could not authenticate with the Github Package Registry. This is probably due to a misconfiguration in Github Package Registry Mirror.');
                 console.error('Got status 400 from the server: ' + await response.text());
                 return;
             } else if (response.status === 404) {
