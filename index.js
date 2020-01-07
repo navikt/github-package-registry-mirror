@@ -254,6 +254,8 @@ async function handleCached(req, res, repo, path) {
 
 const app = express();
 
+app.use(express.static(__dirname));
+
 app.get('/dummy', async (req, res) => {
     try {
         console.log('reading dummy secret');
@@ -263,10 +265,6 @@ app.get('/dummy', async (req, res) => {
         console.error('Unexpected error', err);
         res.status(500).send('Server error');
     }
-});
-
-app.get('/', (req, res) => {
-    res.send('Dette er et mirror for Github Package Registry. Work in progress...');
 });
 
 app.get('/favicon.ico', (req, res) => res.status(404).end());
