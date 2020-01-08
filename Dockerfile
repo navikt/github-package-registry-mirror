@@ -6,4 +6,4 @@ ADD . .
 
 RUN npm ci
 
-CMD ["node", "index.js"]
+CMD ["node", "src/index.js"]
