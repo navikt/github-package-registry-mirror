@@ -41,11 +41,15 @@ function waitForStreamToEnd(stream) {
 }
 
 const storage = new Storage();
+function bucket() {
+    return storage.bucket('github-package-registry-storage');
+}
+
 async function getToken(tokenName) {
-    if (await localFileExists('github-token')) {
-        return fs.readFileSync('github-token', 'utf-8').trim();
+    if (await localFileExists(tokenName)) {
+        return fs.readFileSync(tokenName, 'utf-8').trim();
     } else {
-        const stream = await storage.bucket('github-package-registry-mirror-storage').file('credentials/' + tokenName).createReadStream();
+        const stream = await bucket().file('credentials/' + tokenName).createReadStream();
         const data = await streamToString(stream);
         return data.trim();
     }
@@ -169,7 +173,7 @@ async function handleCached(req, res, repo, path) {
         let exists;
         try {
             console.log(`Checking Cloud Storage for file ${file}`);
-            exists = (await storage.bucket('github-package-registry-mirror-storage').file(file).exists())[0];
+            exists = (await bucket().file(file).exists())[0];
             console.log(`Does the file ${file} exist?`, exists);
         } catch (error) {
             console.error('Could not check if the file existed', error);
@@ -211,7 +215,7 @@ async function handleCached(req, res, repo, path) {
                 }
 
                 const readStream = artifactResponse.body;
-                const writeStream = await storage.bucket('github-package-registry-mirror-storage').file('cache/' + repo + '/' + path).createWriteStream();
+                const writeStream = await bucket().file(file).createWriteStream();
                 readStream.pipe(writeStream);
                 readStream.pipe(res);
 
@@ -220,7 +224,7 @@ async function handleCached(req, res, repo, path) {
                 return;
             } else if (response.status === 200) {
                 const readStream = response.body;
-                const writeStream = await storage.bucket('github-package-registry-mirror-storage').file('cache/' + repo + '/' + path).createWriteStream();
+                const writeStream = await bucket().file(file).createWriteStream();
                 readStream.pipe(writeStream);
                 readStream.pipe(res);
                 await waitForStreamToEnd(writeStream);
@@ -244,7 +248,7 @@ async function handleCached(req, res, repo, path) {
             }
         }
 
-        const readStream = await storage.bucket('github-package-registry-mirror-storage').file('cache/' + repo + '/' + path).createReadStream();
+        const readStream = await bucket().file(file).createReadStream();
         await readStream.pipe(res);
     } catch (err) {
         console.error('Unexpected error', err);
