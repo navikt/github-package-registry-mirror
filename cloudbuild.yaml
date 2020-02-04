@@ -7,6 +7,18 @@ steps:
     args: ['push', 'gcr.io/$PROJECT_ID/github-package-registry-mirror']
     # Deploy container image to Cloud Run
   - name: 'gcr.io/cloud-builders/gcloud'
-    args: ['beta', 'run', 'deploy', 'github-package-registry-mirror', '--image', 'gcr.io/$PROJECT_ID/github-package-registry-mirror', '--region', 'europe-west1','--platform', 'managed', '--quiet']
+    args:
+    - 'beta'
+    - 'run'
+    - 'deploy'
+    - 'github-package-registry-mirror'
+    - '--image'
+    - 'gcr.io/$PROJECT_ID/github-package-registry-mirror'
+    - '--region'
+    - 'europe-west1'
+    - '--platform'
+    - 'managed'
+    - '--quiet'
+    - '--allow-unauthenticated'
 images:
   - gcr.io/$PROJECT_ID/github-package-registry-mirror
