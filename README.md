@@ -10,8 +10,7 @@ in which case this proxy is a temporary solution.
 Every commit to the `master`-branch will automatically be built by Google Cloud Build,
 and the resulting Docker image is deployed as a serverless function on Google Cloud Run.
 
-The app runs on [https://github-package-registry-mirror-sr4qwz23da-ew.a.run.app/](https://github-package-registry-mirror-sr4qwz23da-ew.a.run.app/)
-as part of the "aura" project on Google Cloud.
+The app runs on [https://github-package-registry-mirror.gc.nav.no/](https://github-package-registry-mirror-sr4qwz23da-ew.a.run.app/).
 
 ## Cache
 
