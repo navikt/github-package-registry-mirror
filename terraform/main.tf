@@ -1,4 +1,5 @@
 provider "google-beta" {
+  credentials = file("service-account-credentials.json")
   project     = "github-package-registry-mirror"
   region      = "europe-north1"
 }
@@ -37,6 +38,20 @@ resource "google_cloud_run_service" "default" {
       metadata,
       template
     ]
+  }
+}
+
+resource "google_cloud_run_domain_mapping" "default" {
+  project = "github-package-registry-mirror"
+  location = "europe-north1"
+  name     = "github-package-registry-mirror.gc.nav.no"
+
+  metadata {
+    namespace = "github-package-registry-mirror"
+  }
+
+  spec {
+    route_name = google_cloud_run_service.default.name
   }
 }
 
