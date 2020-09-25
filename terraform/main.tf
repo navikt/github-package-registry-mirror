@@ -55,6 +55,12 @@ resource "google_cloud_run_domain_mapping" "default" {
   }
 }
 
+resource "google_storage_bucket" "mirror-artifacts" {
+  project = "github-package-registry-mirror"
+  name     = "github-package-registry-artifacts"
+  location = "europe-north1"
+}
+
 resource "google_cloudbuild_trigger" "build-trigger" {
   provider = google-beta
 
@@ -67,6 +73,7 @@ resource "google_cloudbuild_trigger" "build-trigger" {
   }
 
   substitutions = {
+    _ARTIFACT_BUCKET_URL = google_storage_bucket.mirror-artifacts.url
   }
 
   filename = "cloudbuild.yaml"
