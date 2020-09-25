@@ -1,12 +1,12 @@
 steps:
   # build the container image
-  - name: 'eu.gcr.io/cloud-builders/docker'
+  - name: 'gcr.io/cloud-builders/docker'
     args: ['build', '-t', 'eu.gcr.io/$PROJECT_ID/github-package-registry-mirror', '.']
     # push the container image to Container Registry
-  - name: 'eu.gcr.io/cloud-builders/docker'
+  - name: 'gcr.io/cloud-builders/docker'
     args: ['push', 'eu.gcr.io/$PROJECT_ID/github-package-registry-mirror']
     # Deploy container image to Cloud Run
-  - name: 'eu.gcr.io/cloud-builders/gcloud'
+  - name: 'gcr.io/cloud-builders/gcloud'
     args:
     - 'beta'
     - 'run'
