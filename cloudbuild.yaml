@@ -22,6 +22,3 @@ steps:
     - '--allow-unauthenticated'
 images:
   - gcr.io/$PROJECT_ID/github-package-registry-mirror
-artifacts:
-  objects:
-    location: '${_ARTIFACT_BUCKET_URL}'
