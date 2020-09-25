@@ -27,7 +27,7 @@ resource "google_cloud_run_service" "default" {
   template {
     spec {
       containers {
-        image = "gcr.io/github-package-registry-mirror/github-package-registry-mirror"
+        image = "eu.gcr.io/github-package-registry-mirror/github-package-registry-mirror"
       }
     }
   }
