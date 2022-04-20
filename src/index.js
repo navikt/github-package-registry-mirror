@@ -68,12 +68,22 @@ function parsePathAsArtifact(path) {
     if (path.length < 4) {
         throw new Error(`The path ${path} is not a valid Maven repository path.`);
     }
-    const splitted = path.split('/');
-    const file = splitted[splitted.length - 1];
-    const version = splitted[splitted.length - 2];
-    const artifactId = splitted[splitted.length - 3];
-    const groupId = splitted.splice(0, splitted.length - 3).join('.');
-    return { groupId, artifactId, version, file };
+
+    if (path.endsWith("maven-metadata.xml")) {
+        const splitted = path.split('/');
+        const file = splitted[splitted.length - 1];
+        const version = ""
+        const artifactId = splitted[splitted.length - 2];
+        const groupId = splitted.splice(0, splitted.length - 2).join('.');
+        return { groupId, artifactId, version, file };
+    } else {
+        const splitted = path.split('/');
+        const file = splitted[splitted.length - 1];
+        const version = splitted[splitted.length - 2];
+        const artifactId = splitted[splitted.length - 3];
+        const groupId = splitted.splice(0, splitted.length - 3).join('.');
+        return { groupId, artifactId, version, file };
+    }
 }
 
 async function isPackagePublic(path, token) {
