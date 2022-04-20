@@ -185,8 +185,16 @@ async function handleSimple(req, res, repo, path) {
     }
 }
 
+function skipCache(path) {
+    return path.endsWith("maven-metadata.xml")
+}
+
 async function handleCached(req, res, repo, path) {
     try {
+        if (skipCache(path)) {
+            return handleSimple(req, res, repo, path);
+        }
+
         console.log(`Handle cached artifact, repo ${repo}, path ${path}`);
         const file = 'cache/' + repo + '/' + path;
 
