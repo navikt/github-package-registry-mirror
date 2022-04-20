@@ -79,6 +79,9 @@ function parsePathAsArtifact(path) {
 async function isPackagePublic(path, token) {
     const parsed = parsePathAsArtifact(path);
     const packageName = parsed.groupId + '.' + parsed.artifactId;
+
+    console.info(`parsed: ${JSON.stringify(parsed)} , packageName: ${packageName}`);
+
     const query = `
         query {
             organization(login:"navikt") {
