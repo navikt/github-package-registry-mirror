@@ -113,9 +113,16 @@ async function isPackagePublic(path, token) {
         };
     }
 
-    return {
-        result: !result.data.organization.packages.nodes[0].repository.isPrivate
-    };
+    if (result.data.organization.packages.nodes[0].repository === undefined || result.data.organization.packages.nodes[0].repository === null) {
+        return {
+            error: 'PACKAGE_NODE_HAS_NO_REPOSITORY',
+            result: false
+        };
+    } else {
+        return {
+            result: !result.data.organization.packages.nodes[0].repository.isPrivate
+        };
+    }
 }
 
 async function handleSimple(req, res, repo, path) {
