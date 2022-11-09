@@ -10,7 +10,7 @@
   "author": "NAV (Arbeids- og velferdsdirektoratet) - The Norwegian Labour and Welfare Administration",
   "license": "MIT",
   "dependencies": {
-    "@google-cloud/storage": "^4.2.0",
+    "@google-cloud/storage": "^4.7.2",
     "express": "^4.17.1",
     "node-fetch": "^2.6.7"
   }
