@@ -229,7 +229,11 @@ async function handleCached(req, res, repo, path) {
                 redirect: 'manual'
             });
 
-            console.log(`Fetched from ${resolvedGithubPath}, status code was ${response.status}`);
+            if (response.status === 302) {
+                console.log(`Fetched from ${resolvedGithubPath}, status code was ${response.status}, location was ${response.headers.get("Location")}`);
+            } else {
+                console.log(`Fetched from ${resolvedGithubPath}, status code was ${response.status}`);
+            }
 
             if (response.status === 301) {
                 const location = response.headers.get('location');
