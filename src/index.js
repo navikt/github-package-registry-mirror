@@ -235,7 +235,7 @@ async function handleCached(req, res, repo, path) {
                 console.log(`Fetched from ${resolvedGithubPath}, status code was ${response.status}`);
             }
 
-            if (response.status === 301) {
+            if (response.status === 301 || response.status === 302) {
                 const location = response.headers.get('location');
                 console.log(`Fetching artifact from ${location}`);
                 const artifactResponse = await fetch(location);
