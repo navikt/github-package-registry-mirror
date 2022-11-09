@@ -268,7 +268,7 @@ async function handleCached(req, res, repo, path) {
                 return;
             } else if (response.status === 404) {
                 console.info('Got 404 from Github Package Registry');
-                res.status(400).send('404 Not Found: Looks like this package doesn\'t on Github Package Registry.');
+                res.status(404).send('404 Not Found: Looks like this package doesn\'t on Github Package Registry.');
                 return;
             } else if (response.status === 422) {
                 res.status(422).send('422: The file path you provided was probably invalid (not a valid Maven repository path)');
