@@ -119,6 +119,11 @@ async function isPackagePublic(path, token) {
 
     const result = await response.json();
 
+    if (result.data === undefined || result.data == null) {
+        console.error(`Unexpected response from GitHub`, response.status);
+        console.error(`Unexpected response from GitHub`, result);
+    }
+
     if (result.data.organization.packages.nodes.length === 0) {
         return {
             error: 'PACKAGE_NOT_FOUND',
