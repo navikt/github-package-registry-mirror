@@ -205,7 +205,11 @@ async function existsInCache(fileName) {
         if (exists && isMavenMetadataXml(fileName)) {
             const now = new Date();
 
+            console.log(`Fetching metadata for ${fileName}`);
+
             const [metadata] = await file.getMetadata();
+
+            console.log(`Fetched metadata for ${fileName}`, metadata);
             let created = new Date(metadata.timeCreated);
 
             const ageInMilliseconds = now - created;
