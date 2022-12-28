@@ -238,7 +238,7 @@ async function handleCached(req, res, repo, path) {
         console.log(`Handle cached artifact, repo ${repo}, path ${path}`);
         const file = 'cache/' + repo + '/' + path;
 
-        let exists = existsInCache(file)
+        let exists = await existsInCache(file)
 
         if (!exists) {
             const token = await getToken('github-token');
