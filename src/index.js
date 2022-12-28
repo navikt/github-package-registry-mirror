@@ -190,28 +190,51 @@ async function handleSimple(req, res, repo, path) {
     }
 }
 
-function skipCache(path) {
+function isMavenMetadataXml(path) {
     return path.endsWith("maven-metadata.xml")
+}
+
+async function existsInCache(fileName) {
+    let exists;
+    try {
+        console.log(`Checking Cloud Storage for file ${fileName}`);
+        let file = bucket().file(fileName);
+
+        exists = (await file.exists())[0];
+
+        if (exists && isMavenMetadataXml(fileName)) {
+            const now = new Date();
+
+            const [metadata] = await file.getMetadata();
+            let created = new Date(metadata.timeCreated);
+
+            const ageInMilliseconds = now - created;
+            const ageInMinutes = ageInMilliseconds / (60 * 1000)
+
+            if (ageInMinutes > 15) {
+                console.log(`Too old metadata file ${fileName}, created ${created}, time now ${now}, age ${ageInMinutes} minutes`);
+                await file.delete()
+                return false
+            } else {
+                console.log(`Reusing metadata file ${fileName}, created ${created}, time now ${now}, age ${ageInMinutes} minutes`);
+                return true
+            }
+        } else {
+            console.log(`Does the file ${fileName} exist?`, exists);
+            return exists
+        }
+    } catch (error) {
+        console.error('Could not check if the file existed', error);
+        throw error;
+    }
 }
 
 async function handleCached(req, res, repo, path) {
     try {
-        if (skipCache(path)) {
-            return handleSimple(req, res, repo, path);
-        }
-
         console.log(`Handle cached artifact, repo ${repo}, path ${path}`);
         const file = 'cache/' + repo + '/' + path;
 
-        let exists;
-        try {
-            console.log(`Checking Cloud Storage for file ${file}`);
-            exists = (await bucket().file(file).exists())[0];
-            console.log(`Does the file ${file} exist?`, exists);
-        } catch (error) {
-            console.error('Could not check if the file existed', error);
-            throw error;
-        }
+        let exists = existsInCache(file)
 
         if (!exists) {
             const token = await getToken('github-token');
