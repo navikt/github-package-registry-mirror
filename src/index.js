@@ -146,7 +146,7 @@ async function handleSimple(req, res, repo, path) {
 
         const parsed = parsePathAsArtifact(path);
 
-        console.info(`parsed: ${JSON.stringify(parsed)} , packageName: ${packageName}`);
+        console.info(`parsed: ${JSON.stringify(parsed)}`);
 
         if (!parsed.groupId.startsWith("no.nav")) {
             res.status(404).send(`GroupId does not start with 'no.nav'. Assuming a non NAV package`);
@@ -246,7 +246,7 @@ async function handleCached(req, res, repo, path) {
 
             const parsed = parsePathAsArtifact(path);
 
-            console.info(`parsed: ${JSON.stringify(parsed)} , packageName: ${packageName}`);
+            console.info(`parsed: ${JSON.stringify(parsed)}`);
 
             if (!parsed.groupId.startsWith("no.nav")) {
                 res.status(404).send(`GroupId does not start with 'no.nav'. Assuming a non NAV package`);
