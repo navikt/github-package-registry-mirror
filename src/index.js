@@ -244,6 +244,8 @@ async function handleCached(req, res, repo, path) {
         if (!exists) {
             const token = await getToken('github-token');
 
+            const parsed = parsePathAsArtifact(path);
+
             console.info(`parsed: ${JSON.stringify(parsed)} , packageName: ${packageName}`);
 
             if (!parsed.groupId.startsWith("no.nav")) {
