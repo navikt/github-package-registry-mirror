@@ -155,7 +155,7 @@ async function handleSimple(req, res, repo, path) {
         console.info(`parsed: ${JSON.stringify(parsed)}`);
 
         if (!isNavPackage(parsed)) {
-            res.status(404).send(`GroupId does not accepted prefixes. Assuming a non NAV package`);
+            res.status(404).send(`GroupId does not start with an accepted prefix. Assuming a non NAV package`);
             return;
         }
 
@@ -255,7 +255,7 @@ async function handleCached(req, res, repo, path) {
             console.info(`parsed: ${JSON.stringify(parsed)}`);
 
             if (!isNavPackage(parsed)) {
-                res.status(404).send(`GroupId does not accepted prefixes. Assuming a non NAV package`);
+                res.status(404).send(`GroupId does not start with an accepted prefix. Assuming a non NAV package`);
                 return;
             }
 
