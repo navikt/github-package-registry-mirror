@@ -86,11 +86,8 @@ function parsePathAsArtifact(path) {
     }
 }
 
-async function isPackagePublic(path, token) {
-    const parsed = parsePathAsArtifact(path);
+async function isPackagePublic(parsed, token) {
     const packageName = parsed.groupId + '.' + parsed.artifactId;
-
-    console.info(`parsed: ${JSON.stringify(parsed)} , packageName: ${packageName}`);
 
     const query = `
         query {
@@ -147,8 +144,16 @@ async function handleSimple(req, res, repo, path) {
     try {
         const token = await getToken('github-token');
 
-        const isPackagePublicStatus = await isPackagePublic(path, token);
+        const parsed = parsePathAsArtifact(path);
 
+        console.info(`parsed: ${JSON.stringify(parsed)} , packageName: ${packageName}`);
+
+        if (!parsed.groupId.startsWith("no.nav")) {
+            res.status(404).send(`GroupId does not start with 'no.nav'. Assuming a non NAV package`);
+            return;
+        }
+
+        const isPackagePublicStatus = await isPackagePublic(parsed, token);
         if (!isPackagePublicStatus.result) {
             if (isPackagePublicStatus.error) {
                 console.error(`Could not get package visibility status`, isPackagePublicStatus.error);
@@ -239,8 +244,14 @@ async function handleCached(req, res, repo, path) {
         if (!exists) {
             const token = await getToken('github-token');
 
-            const isPackagePublicStatus = await isPackagePublic(path, token);
+            console.info(`parsed: ${JSON.stringify(parsed)} , packageName: ${packageName}`);
 
+            if (!parsed.groupId.startsWith("no.nav")) {
+                res.status(404).send(`GroupId does not start with 'no.nav'. Assuming a non NAV package`);
+                return;
+            }
+
+            const isPackagePublicStatus = await isPackagePublic(parsed, token);
             if (!isPackagePublicStatus.result) {
                 if (isPackagePublicStatus.error) {
                     console.error(`Could not get package visibility status`, isPackagePublicStatus.error);
