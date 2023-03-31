@@ -141,8 +141,9 @@ async function isPackagePublic(parsed, token) {
 }
 
 function isNavPackage(parsed) {
-    return parsed.groupId.startsWith("no.nav")
-        || parsed.groupId.startsWith("com.github.navikt")
+    return parsed.groupId.startsWith("com.github.navikt")
+        || parsed.groupId.startsWith("no.nav")
+        || parsed.groupId.startsWith("no.stelvio")
 }
 
 async function handleSimple(req, res, repo, path) {
