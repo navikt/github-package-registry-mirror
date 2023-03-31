@@ -140,6 +140,11 @@ async function isPackagePublic(parsed, token) {
     }
 }
 
+function isNavPackage(parsed) {
+    return parsed.groupId.startsWith("no.nav")
+        || parsed.groupId.startsWith("com.github.navikt")
+}
+
 async function handleSimple(req, res, repo, path) {
     try {
         const token = await getToken('github-token');
@@ -148,8 +153,8 @@ async function handleSimple(req, res, repo, path) {
 
         console.info(`parsed: ${JSON.stringify(parsed)}`);
 
-        if (!parsed.groupId.startsWith("no.nav")) {
-            res.status(404).send(`GroupId does not start with 'no.nav'. Assuming a non NAV package`);
+        if (!isNavPackage(parsed)) {
+            res.status(404).send(`GroupId does not accepted prefixes. Assuming a non NAV package`);
             return;
         }
 
@@ -248,8 +253,8 @@ async function handleCached(req, res, repo, path) {
 
             console.info(`parsed: ${JSON.stringify(parsed)}`);
 
-            if (!parsed.groupId.startsWith("no.nav")) {
-                res.status(404).send(`GroupId does not start with 'no.nav'. Assuming a non NAV package`);
+            if (!isNavPackage(parsed)) {
+                res.status(404).send(`GroupId does not accepted prefixes. Assuming a non NAV package`);
                 return;
             }
 
