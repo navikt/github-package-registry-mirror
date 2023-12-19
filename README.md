@@ -14,4 +14,4 @@ The app runs on [https://github-package-registry-mirror.gc.nav.no/](https://gith
 
 ## Cache
 
-Artifacts from Github are cached in an object store.
+Artifacts from GitHub are cached in an object store.

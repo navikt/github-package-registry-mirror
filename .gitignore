@@ -1,3 +1,7 @@
 /node_modules
 /integrationtest/tmp
 github-token
+
+# Idea project files
+*.iml
+.idea/
