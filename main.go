@@ -83,16 +83,6 @@ func main() {
 		w.WriteHeader(http.StatusNotFound)
 	})
 
-	mux.HandleFunc("GET /dummy", func(w http.ResponseWriter, r *http.Request) {
-		secret, err := app.GetToken(r.Context(), "dummy-token")
-		if err != nil {
-			logger.Error("failed to get dummy token", "error", err)
-			http.Error(w, "Server error", http.StatusInternalServerError)
-			return
-		}
-		_, _ = w.Write([]byte(secret))
-	})
-
 	const indexHTML = `<!DOCTYPE html>
 <html>
 <head>
@@ -125,8 +115,12 @@ func main() {
 	})
 
 	server := &http.Server{
-		Addr:    ":" + port,
-		Handler: mux,
+		Addr:              ":" + port,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)

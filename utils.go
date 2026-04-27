@@ -4,8 +4,11 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 )
+
+var validMavenCoordinate = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
 
 // Artifact holds parsed Maven path components.
 type Artifact struct {
@@ -33,12 +36,15 @@ func IsMavenMetadataXml(path string) bool {
 	return strings.HasSuffix(path, "/maven-metadata.xml") || path == "maven-metadata.xml"
 }
 
-// ModifiedHeadersWithAuth clones headers, sets Authorization, removes Host.
-func ModifiedHeadersWithAuth(headers http.Header, token string) http.Header {
-	cloned := headers.Clone()
-	cloned.Set("Authorization", TokenAuthHeader(token))
-	cloned.Del("Host")
-	return cloned
+func IsValidMavenCoordinate(s string) bool {
+	return validMavenCoordinate.MatchString(s)
+}
+
+// ModifiedHeadersWithAuth creates fresh headers with Authorization.
+func ModifiedHeadersWithAuth(token string) http.Header {
+	h := http.Header{}
+	h.Set("Authorization", TokenAuthHeader(token))
+	return h
 }
 
 // ParsePathAsArtifact parses a Maven repository path into its components.

@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/base64"
-	"net/http"
 	"testing"
 )
 
@@ -79,38 +78,67 @@ func TestIsMavenMetadataXml(t *testing.T) {
 }
 
 func TestModifiedHeadersWithAuth(t *testing.T) {
-	t.Run("sets authorization and removes host, preserves other headers", func(t *testing.T) {
-		orig := http.Header{
-			"Authorization": {"old-auth"},
-			"Host":          {"example.com"},
-			"X-Custom":      {"custom-value"},
-		}
+	t.Run("sets authorization header", func(t *testing.T) {
 		token := "secret"
-		got := ModifiedHeadersWithAuth(orig, token)
+		got := ModifiedHeadersWithAuth(token)
 		if got.Get("Authorization") != TokenAuthHeader(token) {
 			t.Errorf("Authorization = %q, want %q", got.Get("Authorization"), TokenAuthHeader(token))
 		}
-		if got.Get("Host") != "" {
-			t.Errorf("Host should be deleted, got %q", got.Get("Host"))
-		}
-		if got.Get("X-Custom") != "custom-value" {
-			t.Errorf("X-Custom = %q, want %q", got.Get("X-Custom"), "custom-value")
-		}
 	})
 
-	t.Run("does not mutate original headers", func(t *testing.T) {
-		orig := http.Header{
-			"Authorization": {"original-auth"},
-			"Host":          {"original-host"},
-		}
-		_ = ModifiedHeadersWithAuth(orig, "new-token")
-		if orig.Get("Authorization") != "original-auth" {
-			t.Errorf("original Authorization mutated: got %q", orig.Get("Authorization"))
-		}
-		if orig.Get("Host") != "original-host" {
-			t.Errorf("original Host mutated: got %q", orig.Get("Host"))
+	t.Run("contains only authorization header", func(t *testing.T) {
+		got := ModifiedHeadersWithAuth("token")
+		if len(got) != 1 {
+			t.Errorf("header count = %d, want 1, headers: %v", len(got), got)
 		}
 	})
+}
+
+func TestIsValidMavenCoordinate(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"no.nav.foo", true},
+		{"com.github.navikt", true},
+		{"my-artifact", true},
+		{"version_1.0", true},
+		{"", false},
+		{"foo\"bar", false},
+		{"foo bar", false},
+		{"foo/bar", false},
+		{"foo\\bar", false},
+		{`foo}bar`, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			if got := IsValidMavenCoordinate(tt.input); got != tt.want {
+				t.Errorf("IsValidMavenCoordinate(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestContainsPathTraversal(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{"valid path", "no/nav/foo/bar", false},
+		{"dot segment", "no/nav/./bar", true},
+		{"dot dot segment", "no/nav/../bar", true},
+		{"leading slash creates empty segment", "/no/nav/bar", true},
+		{"double slash creates empty segment", "no//nav/bar", true},
+		{"empty path", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := containsPathTraversal(tt.path); got != tt.want {
+				t.Errorf("containsPathTraversal(%q) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
 }
 
 func TestParsePathAsArtifact(t *testing.T) {

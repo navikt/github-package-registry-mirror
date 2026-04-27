@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -188,16 +189,23 @@ func TestHandleSimple(t *testing.T) {
 		var fetchCalls []struct {
 			url     string
 			headers http.Header
+			body    string
 		}
 		fetch := mockFetch(
 			publicGraphQLResponse(),
 			artifactResponse(200, "artifact-data"),
 		)
 		fetchWrapper := func(ctx context.Context, url string, method string, headers http.Header, body io.Reader) (*http.Response, error) {
+			var bodyBytes []byte
+			if body != nil {
+				bodyBytes, _ = io.ReadAll(body)
+				body = bytes.NewReader(bodyBytes)
+			}
 			fetchCalls = append(fetchCalls, struct {
 				url     string
 				headers http.Header
-			}{url, headers.Clone()})
+				body    string
+			}{url, headers.Clone(), string(bodyBytes)})
 			return fetch(ctx, url, method, headers, body)
 		}
 		srv := newTestServer(fetchWrapper, tokenFn(token), storage)
@@ -223,9 +231,26 @@ func TestHandleSimple(t *testing.T) {
 		if gqlAuth != "bearer "+token {
 			t.Errorf("graphql auth = %q, want %q", gqlAuth, "bearer "+token)
 		}
+		var gqlPayload struct {
+			Query     string         `json:"query"`
+			Variables map[string]any `json:"variables"`
+		}
+		if err := json.Unmarshal([]byte(fetchCalls[0].body), &gqlPayload); err != nil {
+			t.Fatalf("failed to decode graphql payload: %v", err)
+		}
+		if gqlPayload.Query == "" {
+			t.Error("graphql query should not be empty")
+		}
+		nameValues, ok := gqlPayload.Variables["name"].([]any)
+		if !ok || len(nameValues) != 1 || nameValues[0] != "no.nav.foo.bar" {
+			t.Errorf("graphql variables[name] = %#v, want [\"no.nav.foo.bar\"]", gqlPayload.Variables["name"])
+		}
 		artAuth := fetchCalls[1].headers.Get("Authorization")
 		if artAuth != TokenAuthHeader(token) {
 			t.Errorf("artifact auth = %q, want %q", artAuth, TokenAuthHeader(token))
+		}
+		if len(fetchCalls[1].headers) != 1 {
+			t.Errorf("artifact headers = %#v, want only authorization header", fetchCalls[1].headers)
 		}
 	})
 
@@ -429,6 +454,25 @@ func TestHandleSimple(t *testing.T) {
 			t.Errorf("body = %q, want 'Server error'", body)
 		}
 	})
+
+	t.Run("returns 422 for invalid maven coordinates in simple path", func(t *testing.T) {
+		panicFetch := func(ctx context.Context, url string, method string, headers http.Header, body io.Reader) (*http.Response, error) {
+			t.Errorf("fetch should not be called for invalid coordinates, called with %q", url)
+			return nil, fmt.Errorf("unexpected call")
+		}
+		srv := newTestServer(panicFetch, tokenFn("token"), storage)
+		defer srv.Close()
+
+		resp, err := http.Get(srv.URL + "/simple/tjenestespesifikasjoner/no/nav/foo/bar!/1.0/bar-1.0.jar")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != 422 {
+			t.Errorf("status = %d, want 422", resp.StatusCode)
+		}
+	})
 }
 
 const (
@@ -508,6 +552,27 @@ func TestHandleCached(t *testing.T) {
 		}
 		if len(fetchCalls[2].headers) != 0 {
 			t.Errorf("redirect headers = %#v, want empty headers", fetchCalls[2].headers)
+		}
+	})
+
+	t.Run("cache miss redirect to disallowed host returns 500", func(t *testing.T) {
+		storage, _ := newMockStorage(false, time.Time{}, "")
+		redirectHeaders := http.Header{"Location": {"https://evil.example/artifact"}}
+		fetch := mockFetch(
+			publicGraphQLResponse(),
+			artifactResponse(302, "", redirectHeaders),
+		)
+		srv := newTestServer(fetch, tokenFn("token"), storage)
+		defer srv.Close()
+
+		resp, err := http.Get(srv.URL + cachedPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != 500 {
+			t.Errorf("status = %d, want 500", resp.StatusCode)
 		}
 	})
 
@@ -711,6 +776,26 @@ func TestHandleCached(t *testing.T) {
 		body, _ := io.ReadAll(resp.Body)
 		if strings.TrimSpace(string(body)) != "Server error" {
 			t.Errorf("body = %q, want 'Server error'", body)
+		}
+	})
+
+	t.Run("returns 422 for invalid maven coordinates in cached path", func(t *testing.T) {
+		storage, _ := newMockStorage(false, time.Time{}, "")
+		panicFetch := func(ctx context.Context, url string, method string, headers http.Header, body io.Reader) (*http.Response, error) {
+			t.Errorf("fetch should not be called for invalid coordinates, called with %q", url)
+			return nil, fmt.Errorf("unexpected call")
+		}
+		srv := newTestServer(panicFetch, tokenFn("token"), storage)
+		defer srv.Close()
+
+		resp, err := http.Get(srv.URL + "/cached/tjenestespesifikasjoner/no/nav/foo/bar!/1.0/bar-1.0.jar")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != 422 {
+			t.Errorf("status = %d, want 422", resp.StatusCode)
 		}
 	})
 }
