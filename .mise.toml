@@ -1,11 +1,20 @@
 [tools]
-node = "24"
+go = "1.24"
+golangci-lint = "latest"
 gradle = "8.14.4"
 java = "temurin-21"
 
 [tasks.test]
 description = "Run unit tests"
-run = "node --test 'test/unit/*.test.js'"
+run = "go test -race ./..."
+
+[tasks.check]
+description = "Run all linters and static analysis"
+run = "gofumpt -l . && golangci-lint run && staticcheck ./... && govulncheck ./..."
+
+[tasks.run]
+description = "Run the server locally"
+run = "go run ."
 
 [tasks."test:integration"]
 description = "Run integration test (resolves a real Maven package through the mirror)"
