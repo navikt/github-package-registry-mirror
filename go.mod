@@ -1,6 +1,6 @@
 module github.com/navikt/github-package-registry-mirror
 
-go 1.25.0
+go 1.26
 
 require cloud.google.com/go/storage v1.62.1
 
