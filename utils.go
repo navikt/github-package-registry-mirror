@@ -21,20 +21,17 @@ type Artifact struct {
 	File       string
 }
 
-// TokenAuthHeader returns a Basic auth header value for the given GitHub token.
 func TokenAuthHeader(token string) string {
 	encoded := base64.StdEncoding.EncodeToString([]byte("token:" + token))
 	return "Basic " + encoded
 }
 
-// IsNavPackage returns true if groupID starts with a NAV-owned prefix.
 func IsNavPackage(groupID string) bool {
 	return strings.HasPrefix(groupID, "com.github.navikt") ||
 		strings.HasPrefix(groupID, "no.nav") ||
 		strings.HasPrefix(groupID, "no.stelvio")
 }
 
-// IsMavenMetadataXml returns true if path ends with /maven-metadata.xml or equals maven-metadata.xml.
 func IsMavenMetadataXml(path string) bool {
 	return strings.HasSuffix(path, "/maven-metadata.xml") || path == "maven-metadata.xml"
 }
@@ -47,56 +44,34 @@ func IsValidPathSegment(s string) bool {
 	return validPathSegment.MatchString(s)
 }
 
-// ModifiedHeadersWithAuth creates fresh headers with Authorization.
 func ModifiedHeadersWithAuth(token string) http.Header {
 	h := http.Header{}
 	h.Set("Authorization", TokenAuthHeader(token))
 	return h
 }
 
-// ParsePathAsArtifact parses a Maven repository path into its components.
-// QUIRK: validates len(path) >= 4 (character count, NOT segment count).
 func ParsePathAsArtifact(path string) (Artifact, error) {
-	if len(path) < 4 {
-		return Artifact{}, fmt.Errorf("not a valid Maven repository path")
-	}
-
 	segments := strings.Split(path, "/")
+
 	if strings.HasSuffix(path, "maven-metadata.xml") {
-		file := segments[len(segments)-1]
-		artifactID := ""
-		if len(segments) >= 2 {
-			artifactID = segments[len(segments)-2]
-		}
-		groupParts := []string{}
-		if len(segments) > 2 {
-			groupParts = segments[:len(segments)-2]
+		if len(segments) < 2 {
+			return Artifact{}, fmt.Errorf("not a valid Maven repository path")
 		}
 		return Artifact{
-			GroupID:    strings.Join(groupParts, "."),
-			ArtifactID: artifactID,
-			Version:    "",
-			File:       file,
+			GroupID:    strings.Join(segments[:len(segments)-2], "."),
+			ArtifactID: segments[len(segments)-2],
+			File:       segments[len(segments)-1],
 		}, nil
 	}
 
-	file := segments[len(segments)-1]
-	version := ""
-	if len(segments) >= 2 {
-		version = segments[len(segments)-2]
+	if len(segments) < 4 {
+		return Artifact{}, fmt.Errorf("not a valid Maven repository path")
 	}
-	artifactID := ""
-	if len(segments) >= 3 {
-		artifactID = segments[len(segments)-3]
-	}
-	groupParts := []string{}
-	if len(segments) > 3 {
-		groupParts = segments[:len(segments)-3]
-	}
+
 	return Artifact{
-		GroupID:    strings.Join(groupParts, "."),
-		ArtifactID: artifactID,
-		Version:    version,
-		File:       file,
+		GroupID:    strings.Join(segments[:len(segments)-3], "."),
+		ArtifactID: segments[len(segments)-3],
+		Version:    segments[len(segments)-2],
+		File:       segments[len(segments)-1],
 	}, nil
 }

@@ -184,24 +184,27 @@ func TestParsePathAsArtifact(t *testing.T) {
 			wantFile:  "maven-metadata.xml",
 		},
 		{
-			name:    "throws for a/b (length 3)",
+			name:    "throws for a/b (2 segments, need 4)",
 			path:    "a/b",
 			wantErr: true,
 		},
 		{
-			name:    "throws for abc (length 3)",
+			name:    "throws for abc (1 segment, need 4)",
 			path:    "abc",
 			wantErr: true,
 		},
 		{
-			name:    "does NOT throw for abcd (length 4) - quirk preserved",
-			path:    "abcd",
-			wantErr: false,
+			name:    "throws for a/b/c (3 segments, need 4)",
+			path:    "a/b/c",
+			wantErr: true,
 		},
 		{
-			name:    "does NOT throw for abcdef (length 6)",
-			path:    "abcdef",
-			wantErr: false,
+			name:      "4 segments is minimum for artifact paths",
+			path:      "a/b/c/d",
+			wantGroup: "a",
+			wantArtID: "b",
+			wantVer:   "c",
+			wantFile:  "d",
 		},
 	}
 	for _, tt := range tests {
