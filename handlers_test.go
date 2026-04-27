@@ -48,15 +48,14 @@ func mockFetch(responses ...*mockResponse) func(ctx context.Context, url string,
 func publicGraphQLResponse() *mockResponse {
 	return &mockResponse{
 		status: 200,
-		body:   `{"data":{"organization":{"packages":{"nodes":[{"repository":{"isPrivate":false}}]}}}}`,
+		body:   `{"data":{"organization":{"packages":{"nodes":[{"repository":{"name":"tjenestespesifikasjoner","isPrivate":false}}]}}}}`,
 	}
 }
 
-// privateGraphQLResponse creates a fake GraphQL response indicating a private package.
 func privateGraphQLResponse() *mockResponse {
 	return &mockResponse{
 		status: 200,
-		body:   `{"data":{"organization":{"packages":{"nodes":[{"repository":{"isPrivate":true}}]}}}}`,
+		body:   `{"data":{"organization":{"packages":{"nodes":[{"repository":{"name":"tjenestespesifikasjoner","isPrivate":true}}]}}}}`,
 	}
 }
 
@@ -555,12 +554,13 @@ func TestHandleCached(t *testing.T) {
 		}
 	})
 
-	t.Run("cache miss redirect to disallowed host returns 500", func(t *testing.T) {
-		storage, _ := newMockStorage(false, time.Time{}, "")
+	t.Run("cache miss redirect to unknown host logs warning but follows redirect", func(t *testing.T) {
+		storage, state := newMockStorage(false, time.Time{}, "")
 		redirectHeaders := http.Header{"Location": {"https://evil.example/artifact"}}
 		fetch := mockFetch(
 			publicGraphQLResponse(),
 			artifactResponse(302, "", redirectHeaders),
+			artifactResponse(200, "redirected-body"),
 		)
 		srv := newTestServer(fetch, tokenFn("token"), storage)
 		defer srv.Close()
@@ -571,8 +571,15 @@ func TestHandleCached(t *testing.T) {
 		}
 		defer resp.Body.Close()
 
-		if resp.StatusCode != 500 {
-			t.Errorf("status = %d, want 500", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != 200 {
+			t.Errorf("status = %d, want 200", resp.StatusCode)
+		}
+		if string(body) != "redirected-body" {
+			t.Errorf("body = %q, want %q", body, "redirected-body")
+		}
+		if state.writtenData != "redirected-body" {
+			t.Errorf("stored = %q, want %q", state.writtenData, "redirected-body")
 		}
 	})
 

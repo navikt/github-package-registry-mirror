@@ -11,8 +11,11 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
+
+const maxArtifactSize = 512 << 20 // 512 MB
 
 var allowedRedirectHosts = map[string]bool{
 	"maven.pkg.github.com":                 true,
@@ -20,11 +23,18 @@ var allowedRedirectHosts = map[string]bool{
 	"pkg-containers.githubusercontent.com": true,
 }
 
+type visibilityCacheEntry struct {
+	isPublic  bool
+	found     bool
+	expiresAt time.Time
+}
+
 type App struct {
-	Fetch    func(ctx context.Context, url string, method string, headers http.Header, body io.Reader) (*http.Response, error)
-	GetToken func(ctx context.Context, name string) (string, error)
-	Storage  Storage
-	Logger   *slog.Logger
+	Fetch           func(ctx context.Context, url string, method string, headers http.Header, body io.Reader) (*http.Response, error)
+	GetToken        func(ctx context.Context, name string) (string, error)
+	Storage         Storage
+	Logger          *slog.Logger
+	visibilityCache sync.Map
 }
 
 func NewDefaultApp(storage Storage, logger *slog.Logger) *App {
@@ -75,9 +85,9 @@ func realGetToken(storage Storage) func(ctx context.Context, name string) (strin
 	}
 }
 
-func (app *App) isPackagePublic(ctx context.Context, token string, parsed Artifact) (isPublic bool, found bool, err error) {
+func (app *App) isPackagePublic(ctx context.Context, token string, parsed Artifact, repo string) (isPublic bool, found bool, err error) {
 	packageName := parsed.GroupID + "." + parsed.ArtifactID
-	query := `query($name: [String!]!) { organization(login:"navikt"){ packages(first:1,names:$name){ nodes{ repository{ isPrivate } } } } }`
+	query := `query($name: [String!]!) { organization(login:"navikt"){ packages(first:1,names:$name){ nodes{ repository{ name isPrivate } } } } }`
 	payload, _ := json.Marshal(map[string]any{
 		"query":     query,
 		"variables": map[string]any{"name": []string{packageName}},
@@ -99,7 +109,8 @@ func (app *App) isPackagePublic(ctx context.Context, token string, parsed Artifa
 				Packages struct {
 					Nodes []struct {
 						Repository *struct {
-							IsPrivate bool `json:"isPrivate"`
+							Name      string `json:"name"`
+							IsPrivate bool   `json:"isPrivate"`
 						} `json:"repository"`
 					} `json:"nodes"`
 				} `json:"packages"`
@@ -121,14 +132,44 @@ func (app *App) isPackagePublic(ctx context.Context, token string, parsed Artifa
 	if len(result.Data.Organization.Packages.Nodes) == 0 {
 		return false, false, nil
 	}
-	if result.Data.Organization.Packages.Nodes[0].Repository == nil {
+	node := result.Data.Organization.Packages.Nodes[0]
+	if node.Repository == nil {
 		return false, false, nil
 	}
-	if result.Data.Organization.Packages.Nodes[0].Repository.IsPrivate {
+	if !strings.EqualFold(node.Repository.Name, repo) {
+		app.Logger.Warn("package repository mismatch", "expected", repo, "got", node.Repository.Name)
+		return false, false, nil
+	}
+	if node.Repository.IsPrivate {
 		return false, true, nil
 	}
 
 	return true, true, nil
+}
+
+const visibilityCacheTTL = 5 * time.Minute
+
+func (app *App) isPackagePublicCached(ctx context.Context, token string, parsed Artifact, repo string) (bool, bool, error) {
+	cacheKey := repo + ":" + parsed.GroupID + "." + parsed.ArtifactID
+	if v, ok := app.visibilityCache.Load(cacheKey); ok {
+		entry := v.(*visibilityCacheEntry)
+		if time.Now().Before(entry.expiresAt) {
+			return entry.isPublic, entry.found, nil
+		}
+		app.visibilityCache.Delete(cacheKey)
+	}
+
+	isPublic, found, err := app.isPackagePublic(ctx, token, parsed, repo)
+	if err != nil {
+		return false, false, err
+	}
+
+	app.visibilityCache.Store(cacheKey, &visibilityCacheEntry{
+		isPublic:  isPublic,
+		found:     found,
+		expiresAt: time.Now().Add(visibilityCacheTTL),
+	})
+	return isPublic, found, nil
 }
 
 func containsPathTraversal(path string) bool {
@@ -181,7 +222,7 @@ func (app *App) handleSimple(w http.ResponseWriter, r *http.Request, repo, path 
 		}
 	}()
 
-	if containsPathTraversal(path) || containsPathTraversal(repo) {
+	if containsPathTraversal(path) || containsPathTraversal(repo) || !IsValidPathSegment(repo) {
 		http.Error(w, "422: The file path you provided was probably invalid (not a valid Maven repository path)", http.StatusUnprocessableEntity)
 		return
 	}
@@ -198,7 +239,9 @@ func (app *App) handleSimple(w http.ResponseWriter, r *http.Request, repo, path 
 		app.Logger.Error("failed to parse artifact path", "path", path, "error", err)
 	}
 
-	if !IsValidMavenCoordinate(parsed.GroupID) || !IsValidMavenCoordinate(parsed.ArtifactID) {
+	if !IsValidMavenCoordinate(parsed.GroupID) || !IsValidMavenCoordinate(parsed.ArtifactID) ||
+		(parsed.Version != "" && !IsValidPathSegment(parsed.Version)) ||
+		(parsed.File != "" && !IsValidPathSegment(parsed.File)) {
 		http.Error(w, "422: The file path you provided was probably invalid (not a valid Maven repository path)", http.StatusUnprocessableEntity)
 		return
 	}
@@ -208,7 +251,7 @@ func (app *App) handleSimple(w http.ResponseWriter, r *http.Request, repo, path 
 		return
 	}
 
-	isPublic, found, err := app.isPackagePublic(r.Context(), token, parsed)
+	isPublic, found, err := app.isPackagePublicCached(r.Context(), token, parsed, repo)
 	if err != nil {
 		app.Logger.Error("failed to get package visibility", "repo", repo, "path", path, "error", err)
 	}
@@ -226,6 +269,12 @@ func (app *App) handleSimple(w http.ResponseWriter, r *http.Request, repo, path 
 	}
 	defer resp.Body.Close()
 
+	if resp.ContentLength > maxArtifactSize {
+		app.Logger.Error("artifact too large", "url", artifactURL, "size", resp.ContentLength)
+		http.Error(w, "Server error", http.StatusBadGateway)
+		return
+	}
+
 	switch resp.StatusCode {
 	case http.StatusOK, http.StatusMovedPermanently:
 		for _, key := range []string{"Content-Type", "Content-Length", "ETag", "Last-Modified", "Location"} {
@@ -236,7 +285,7 @@ func (app *App) handleSimple(w http.ResponseWriter, r *http.Request, repo, path 
 			}
 		}
 		w.WriteHeader(resp.StatusCode)
-		if _, err := io.Copy(w, resp.Body); err != nil {
+		if _, err := io.Copy(w, io.LimitReader(resp.Body, maxArtifactSize)); err != nil {
 			app.Logger.Error("failed streaming simple response", "url", artifactURL, "error", err)
 		}
 	case http.StatusBadRequest:
@@ -257,7 +306,7 @@ func (app *App) handleCached(w http.ResponseWriter, r *http.Request, repo, path 
 		}
 	}()
 
-	if containsPathTraversal(path) || containsPathTraversal(repo) {
+	if containsPathTraversal(path) || containsPathTraversal(repo) || !IsValidPathSegment(repo) {
 		http.Error(w, "422: The file path you provided was probably invalid (not a valid Maven repository path)", http.StatusUnprocessableEntity)
 		return
 	}
@@ -299,7 +348,9 @@ func (app *App) handleCached(w http.ResponseWriter, r *http.Request, repo, path 
 		app.Logger.Error("failed to parse artifact path", "path", path, "error", err)
 	}
 
-	if !IsValidMavenCoordinate(parsed.GroupID) || !IsValidMavenCoordinate(parsed.ArtifactID) {
+	if !IsValidMavenCoordinate(parsed.GroupID) || !IsValidMavenCoordinate(parsed.ArtifactID) ||
+		(parsed.Version != "" && !IsValidPathSegment(parsed.Version)) ||
+		(parsed.File != "" && !IsValidPathSegment(parsed.File)) {
 		http.Error(w, "422: The file path you provided was probably invalid (not a valid Maven repository path)", http.StatusUnprocessableEntity)
 		return
 	}
@@ -309,7 +360,7 @@ func (app *App) handleCached(w http.ResponseWriter, r *http.Request, repo, path 
 		return
 	}
 
-	isPublic, _, err := app.isPackagePublic(r.Context(), token, parsed)
+	isPublic, _, err := app.isPackagePublicCached(r.Context(), token, parsed, repo)
 	if err != nil {
 		app.Logger.Error("failed to get package visibility", "repo", repo, "path", path, "error", err)
 	}
@@ -327,11 +378,17 @@ func (app *App) handleCached(w http.ResponseWriter, r *http.Request, repo, path 
 	}
 	defer resp.Body.Close()
 
+	if resp.ContentLength > maxArtifactSize {
+		app.Logger.Error("artifact too large", "url", artifactURL, "size", resp.ContentLength)
+		http.Error(w, "Server error", http.StatusBadGateway)
+		return
+	}
+
 	switch resp.StatusCode {
 	case http.StatusOK:
 		cacheFile := app.Storage.File(cacheKey)
 		writer := cacheFile.NewWriter(r.Context())
-		tee := io.TeeReader(resp.Body, writer)
+		tee := io.TeeReader(io.LimitReader(resp.Body, maxArtifactSize), writer)
 		_, copyErr := io.Copy(w, tee)
 		closeErr := writer.Close()
 		if copyErr != nil {
@@ -344,10 +401,13 @@ func (app *App) handleCached(w http.ResponseWriter, r *http.Request, repo, path 
 	case http.StatusMovedPermanently, http.StatusFound:
 		location := resp.Header.Get("Location")
 		locationURL, err := url.Parse(location)
-		if err != nil || !allowedRedirectHosts[locationURL.Hostname()] {
-			app.Logger.Error("redirect to disallowed host", "location", location)
+		if err != nil {
+			app.Logger.Error("failed to parse redirect location", "location", location, "error", err)
 			http.Error(w, "Could not fetch the artifact from Github Package Registry.", http.StatusInternalServerError)
 			return
+		}
+		if !allowedRedirectHosts[locationURL.Hostname()] {
+			app.Logger.Warn("redirect to unexpected host", "location", location)
 		}
 		_ = resp.Body.Close()
 
@@ -364,9 +424,15 @@ func (app *App) handleCached(w http.ResponseWriter, r *http.Request, repo, path 
 			return
 		}
 
+		if resp2.ContentLength > maxArtifactSize {
+			app.Logger.Error("redirected artifact too large", "location", location, "size", resp2.ContentLength)
+			http.Error(w, "Server error", http.StatusBadGateway)
+			return
+		}
+
 		cacheFile := app.Storage.File(cacheKey)
 		writer := cacheFile.NewWriter(r.Context())
-		tee := io.TeeReader(resp2.Body, writer)
+		tee := io.TeeReader(io.LimitReader(resp2.Body, maxArtifactSize), writer)
 		_, copyErr := io.Copy(w, tee)
 		closeErr := writer.Close()
 		if copyErr != nil {
