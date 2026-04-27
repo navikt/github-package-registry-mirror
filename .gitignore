@@ -1,5 +1,5 @@
-/node_modules
-/integrationtest/tmp
+github-package-registry-mirror
+*.exe
 github-token
 test/integration/gradle-app/.gradle/
 test/integration/gradle-app/build/
