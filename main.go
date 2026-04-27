@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
@@ -127,19 +128,31 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
+	errCh := make(chan error, 1)
 	logger.Info("server starting", "port", port)
 	go func() {
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Error("server error", "error", err)
+		err := server.ListenAndServe()
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
 		}
 	}()
 
-	<-ctx.Done()
+	select {
+	case err := <-errCh:
+		logger.Error("server failed to start", "error", err)
+		os.Exit(1)
+	case <-ctx.Done():
+	}
+
 	logger.Info("shutting down server")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		logger.Error("shutdown error", "error", err)
+	}
+
+	if err := storage.Close(); err != nil {
+		logger.Error("failed to close storage", "error", err)
 	}
 }
