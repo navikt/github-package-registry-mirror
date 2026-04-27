@@ -5,7 +5,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 if [ -z "${GITHUB_TOKEN:-}" ]; then
-    echo "ERROR: GITHUB_TOKEN environment variable is required" >&2
+    printf 'GITHUB_TOKEN not set. Enter a GitHub PAT with read:packages scope: ' >&2
+    read -r GITHUB_TOKEN
+    export GITHUB_TOKEN
+fi
+
+if [ -z "${GITHUB_TOKEN:-}" ]; then
+    echo "ERROR: GITHUB_TOKEN is required" >&2
     exit 1
 fi
 

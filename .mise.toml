@@ -1,3 +1,19 @@
 [tools]
 node = "24"
 gradle = "8.14.4"
+java = "temurin-26.0.0+35"
+
+[tasks.test]
+description = "Run unit tests"
+run = "node --test 'test/unit/*.test.js'"
+
+[tasks."test:integration"]
+description = "Run integration test (resolves a real Maven package through the mirror)"
+run = """
+if [ -z "${GITHUB_TOKEN:-}" ]; then
+    printf 'GITHUB_TOKEN not set. Enter a GitHub PAT with read:packages scope: '
+    read -r GITHUB_TOKEN
+    export GITHUB_TOKEN
+fi
+bash test/integration/run.sh
+"""

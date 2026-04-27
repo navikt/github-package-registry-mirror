@@ -8,3 +8,8 @@ storage/
 # Idea project files
 *.iml
 .idea/
+.env
+.graymatter
+.sisyphus
+.cursor
+.mcp.json
