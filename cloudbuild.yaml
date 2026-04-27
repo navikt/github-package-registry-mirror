@@ -1,24 +1,21 @@
 steps:
-  # build the container image
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'eu.gcr.io/$PROJECT_ID/github-package-registry-mirror', '.']
-    # push the container image to Container Registry
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', 'eu.gcr.io/$PROJECT_ID/github-package-registry-mirror']
-    # Deploy container image to Cloud Run
   - name: 'gcr.io/cloud-builders/gcloud'
     args:
-    - 'beta'
-    - 'run'
-    - 'deploy'
-    - 'github-package-registry-mirror'
-    - '--image'
-    - 'eu.gcr.io/$PROJECT_ID/github-package-registry-mirror'
-    - '--region'
-    - 'europe-north1'
-    - '--platform'
-    - 'managed'
-    - '--quiet'
-    - '--allow-unauthenticated'
-images:
-  - eu.gcr.io/$PROJECT_ID/github-package-registry-mirror
+      - 'run'
+      - 'deploy'
+      - 'github-package-registry-mirror'
+      - '--source'
+      - '.'
+      - '--region'
+      - 'europe-north1'
+      - '--allow-unauthenticated'
+      - '--cpu'
+      - '1'
+      - '--memory'
+      - '256Mi'
+      - '--concurrency'
+      - '80'
+      - '--timeout'
+      - '900'
+      - '--max-instances'
+      - '1000'
