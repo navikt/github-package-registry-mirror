@@ -1,6 +1,9 @@
 /node_modules
 /integrationtest/tmp
 github-token
+test/integration/gradle-app/.gradle/
+test/integration/gradle-app/build/
+storage/
 
 # Idea project files
 *.iml
