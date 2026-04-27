@@ -6,7 +6,7 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "test": "node --test test/unit/",
+    "test": "node --test 'test/unit/*.test.js'",
     "test:integration": "bash test/integration/run.sh"
   },
   "author": "NAV (Arbeids- og velferdsdirektoratet) - The Norwegian Labour and Welfare Administration",
