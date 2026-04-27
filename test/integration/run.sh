@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -eo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 if [ -z "${GITHUB_TOKEN:-}" ]; then
-  printf 'GITHUB_TOKEN not set. Enter a GitHub PAT with read:packages scope: ' >&2
-  read -r GITHUB_TOKEN
-  export GITHUB_TOKEN
+  if [ -t 0 ]; then
+    printf 'GITHUB_TOKEN not set. Enter a GitHub PAT with read:packages scope: ' >&2
+    read -r GITHUB_TOKEN
+    export GITHUB_TOKEN
+  else
+    echo "ERROR: GITHUB_TOKEN environment variable is required" >&2
+    exit 1
+  fi
 fi
 
 if [ -z "${GITHUB_TOKEN:-}" ]; then
@@ -34,7 +39,7 @@ STORAGE_BACKEND=local STORAGE_PATH="$STORAGE_DIR" go run "$REPO_ROOT/." >"$SERVE
 SERVER_PID=$!
 
 for _ in $(seq 1 20); do
-  PORT=$(lsof -Pan -p "$SERVER_PID" -iTCP -sTCP:LISTEN 2>/dev/null | awk 'NR==2{print $9}' | sed 's/.*://')
+  PORT=$(lsof -Pan -p "$SERVER_PID" -iTCP -sTCP:LISTEN 2>/dev/null | awk 'NR==2{print $9}' | sed 's/.*://' || true)
   if [ -n "$PORT" ]; then
     break
   fi
