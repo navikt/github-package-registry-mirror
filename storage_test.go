@@ -14,7 +14,10 @@ func TestStorage(t *testing.T) {
 	t.Run("write then read round-trip", func(t *testing.T) {
 		dir := t.TempDir()
 		s := NewLocalStorage(dir)
-		w := s.File("artifact.jar").NewWriter(ctx)
+		w, err := s.File("artifact.jar").NewWriter(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if _, err := io.Copy(w, strings.NewReader("hello world")); err != nil {
 			t.Fatal(err)
 		}
@@ -38,7 +41,7 @@ func TestStorage(t *testing.T) {
 	t.Run("Exists returns true for existing file", func(t *testing.T) {
 		dir := t.TempDir()
 		s := NewLocalStorage(dir)
-		w := s.File("present.txt").NewWriter(ctx)
+		w, _ := s.File("present.txt").NewWriter(ctx)
 		_, _ = w.Write([]byte("x"))
 		_ = w.Close()
 		ok, err := s.File("present.txt").Exists(ctx)
@@ -66,7 +69,7 @@ func TestStorage(t *testing.T) {
 		dir := t.TempDir()
 		s := NewLocalStorage(dir)
 		before := time.Now().Add(-time.Second)
-		w := s.File("meta.txt").NewWriter(ctx)
+		w, _ := s.File("meta.txt").NewWriter(ctx)
 		_, _ = w.Write([]byte("x"))
 		_ = w.Close()
 		meta, err := s.File("meta.txt").GetMetadata(ctx)
@@ -84,7 +87,7 @@ func TestStorage(t *testing.T) {
 	t.Run("Delete removes file", func(t *testing.T) {
 		dir := t.TempDir()
 		s := NewLocalStorage(dir)
-		w := s.File("delete-me.txt").NewWriter(ctx)
+		w, _ := s.File("delete-me.txt").NewWriter(ctx)
 		_, _ = w.Write([]byte("x"))
 		_ = w.Close()
 		if err := s.File("delete-me.txt").Delete(ctx); err != nil {
@@ -102,7 +105,7 @@ func TestStorage(t *testing.T) {
 	t.Run("NewWriter creates nested directories", func(t *testing.T) {
 		dir := t.TempDir()
 		s := NewLocalStorage(dir)
-		w := s.File("deep/nested/path/file.txt").NewWriter(ctx)
+		w, _ := s.File("deep/nested/path/file.txt").NewWriter(ctx)
 		_, _ = w.Write([]byte("nested"))
 		_ = w.Close()
 		ok, err := s.File("deep/nested/path/file.txt").Exists(ctx)

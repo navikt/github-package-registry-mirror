@@ -93,6 +93,8 @@ func (m *mockStorageImpl) File(name string) FileHandle {
 	return &mockFileHandle{state: m.state}
 }
 
+func (m *mockStorageImpl) Close() error { return nil }
+
 type mockFileHandle struct {
 	state *mockStorageState
 }
@@ -113,8 +115,8 @@ func (f *mockFileHandle) NewReader(ctx context.Context) (io.ReadCloser, error) {
 	return io.NopCloser(strings.NewReader(f.state.content)), nil
 }
 
-func (f *mockFileHandle) NewWriter(ctx context.Context) io.WriteCloser {
-	return &mockWriter{state: f.state}
+func (f *mockFileHandle) NewWriter(ctx context.Context) (io.WriteCloser, error) {
+	return &mockWriter{state: f.state}, nil
 }
 
 func (f *mockFileHandle) Delete(ctx context.Context) error {
@@ -144,12 +146,13 @@ func newMockStorage(exists bool, timeCreated time.Time, content string) (*mockSt
 
 // newTestServer creates an httptest.Server with an App using mock dependencies.
 func newTestServer(fetch func(ctx context.Context, url string, method string, headers http.Header, body io.Reader) (*http.Response, error), getToken func(ctx context.Context, name string) (string, error), storage Storage) *httptest.Server {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := slog.New(slog.DiscardHandler)
 	app := &App{
-		Fetch:    fetch,
-		GetToken: getToken,
-		Storage:  storage,
-		Logger:   logger,
+		Fetch:           fetch,
+		GetToken:        getToken,
+		Storage:         storage,
+		Logger:          logger,
+		visibilityCache: make(map[string]*visibilityCacheEntry),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /simple/{repo}/{path...}", func(w http.ResponseWriter, r *http.Request) {

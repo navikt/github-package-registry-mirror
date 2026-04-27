@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -20,13 +21,14 @@ type FileHandle interface {
 	Exists(ctx context.Context) (bool, error)
 	GetMetadata(ctx context.Context) (FileMetadata, error)
 	NewReader(ctx context.Context) (io.ReadCloser, error)
-	NewWriter(ctx context.Context) io.WriteCloser
+	NewWriter(ctx context.Context) (io.WriteCloser, error)
 	Delete(ctx context.Context) error
 }
 
 // Storage is the interface for accessing files.
 type Storage interface {
 	File(name string) FileHandle
+	Close() error
 }
 
 // ============================================================
@@ -34,6 +36,7 @@ type Storage interface {
 // ============================================================
 
 type gcsStorage struct {
+	client *storage.Client
 	bucket *storage.BucketHandle
 }
 
@@ -43,11 +46,15 @@ func NewGCSStorage(bucketName string) (Storage, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &gcsStorage{bucket: client.Bucket(bucketName)}, nil
+	return &gcsStorage{client: client, bucket: client.Bucket(bucketName)}, nil
 }
 
 func (g *gcsStorage) File(name string) FileHandle {
 	return &gcsFileHandle{obj: g.bucket.Object(name)}
+}
+
+func (g *gcsStorage) Close() error {
+	return g.client.Close()
 }
 
 type gcsFileHandle struct {
@@ -56,7 +63,7 @@ type gcsFileHandle struct {
 
 func (h *gcsFileHandle) Exists(ctx context.Context) (bool, error) {
 	_, err := h.obj.Attrs(ctx)
-	if err == storage.ErrObjectNotExist {
+	if errors.Is(err, storage.ErrObjectNotExist) {
 		return false, nil
 	}
 	if err != nil {
@@ -77,8 +84,8 @@ func (h *gcsFileHandle) NewReader(ctx context.Context) (io.ReadCloser, error) {
 	return h.obj.NewReader(ctx)
 }
 
-func (h *gcsFileHandle) NewWriter(ctx context.Context) io.WriteCloser {
-	return h.obj.NewWriter(ctx)
+func (h *gcsFileHandle) NewWriter(ctx context.Context) (io.WriteCloser, error) {
+	return h.obj.NewWriter(ctx), nil
 }
 
 func (h *gcsFileHandle) Delete(ctx context.Context) error {
@@ -102,13 +109,15 @@ func (l *localStorage) File(name string) FileHandle {
 	return &localFileHandle{path: filepath.Join(l.basePath, name)}
 }
 
+func (l *localStorage) Close() error { return nil }
+
 type localFileHandle struct {
 	path string
 }
 
 func (h *localFileHandle) Exists(ctx context.Context) (bool, error) {
 	_, err := os.Stat(h.path)
-	if os.IsNotExist(err) {
+	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
 	}
 	if err != nil {
@@ -129,25 +138,13 @@ func (h *localFileHandle) NewReader(ctx context.Context) (io.ReadCloser, error) 
 	return os.Open(h.path)
 }
 
-func (h *localFileHandle) NewWriter(ctx context.Context) io.WriteCloser {
+func (h *localFileHandle) NewWriter(ctx context.Context) (io.WriteCloser, error) {
 	if err := os.MkdirAll(filepath.Dir(h.path), 0o755); err != nil {
-		return &errWriter{err: err}
+		return nil, err
 	}
-	f, err := os.Create(h.path)
-	if err != nil {
-		return &errWriter{err: err}
-	}
-	return f
+	return os.Create(h.path)
 }
 
 func (h *localFileHandle) Delete(ctx context.Context) error {
 	return os.Remove(h.path)
 }
-
-// errWriter is a WriteCloser that always returns an error.
-type errWriter struct {
-	err error
-}
-
-func (e *errWriter) Write(p []byte) (int, error) { return 0, e.err }
-func (e *errWriter) Close() error                { return e.err }

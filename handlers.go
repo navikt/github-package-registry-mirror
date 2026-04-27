@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -34,7 +34,8 @@ type App struct {
 	GetToken        func(ctx context.Context, name string) (string, error)
 	Storage         Storage
 	Logger          *slog.Logger
-	visibilityCache sync.Map
+	visibilityMu    sync.RWMutex
+	visibilityCache map[string]*visibilityCacheEntry
 }
 
 func NewDefaultApp(storage Storage, logger *slog.Logger) *App {
@@ -54,20 +55,21 @@ func NewDefaultApp(storage Storage, logger *slog.Logger) *App {
 			req.Header = headers
 			return client.Do(req)
 		},
-		GetToken: realGetToken(storage),
-		Storage:  storage,
-		Logger:   logger,
+		GetToken:        realGetToken(storage),
+		Storage:         storage,
+		Logger:          logger,
+		visibilityCache: make(map[string]*visibilityCacheEntry),
 	}
 }
 
 func realGetToken(storage Storage) func(ctx context.Context, name string) (string, error) {
 	return func(ctx context.Context, tokenName string) (string, error) {
-		if _, err := os.Stat(tokenName); err == nil {
-			data, err := os.ReadFile(tokenName)
-			if err != nil {
-				return "", err
-			}
+		data, err := os.ReadFile(tokenName)
+		if err == nil {
 			return strings.TrimSpace(string(data)), nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return "", err
 		}
 
 		reader, err := storage.File("credentials/" + tokenName).NewReader(ctx)
@@ -76,7 +78,7 @@ func realGetToken(storage Storage) func(ctx context.Context, name string) (strin
 		}
 		defer reader.Close()
 
-		data, err := io.ReadAll(reader)
+		data, err = io.ReadAll(reader)
 		if err != nil {
 			return "", err
 		}
@@ -103,6 +105,10 @@ func (app *App) isPackagePublic(ctx context.Context, token string, parsed Artifa
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		return false, false, fmt.Errorf("GitHub GraphQL API returned status %d", resp.StatusCode)
+	}
+
 	type graphQLResponse struct {
 		Data *struct {
 			Organization *struct {
@@ -116,11 +122,18 @@ func (app *App) isPackagePublic(ctx context.Context, token string, parsed Artifa
 				} `json:"packages"`
 			} `json:"organization"`
 		} `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
 	}
 
 	var result graphQLResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return false, false, err
+	}
+
+	if len(result.Errors) > 0 {
+		return false, false, fmt.Errorf("GitHub GraphQL error: %s", result.Errors[0].Message)
 	}
 
 	if result.Data == nil {
@@ -151,12 +164,18 @@ const visibilityCacheTTL = 5 * time.Minute
 
 func (app *App) isPackagePublicCached(ctx context.Context, token string, parsed Artifact, repo string) (bool, bool, error) {
 	cacheKey := repo + ":" + parsed.GroupID + "." + parsed.ArtifactID
-	if v, ok := app.visibilityCache.Load(cacheKey); ok {
-		entry := v.(*visibilityCacheEntry)
+
+	app.visibilityMu.RLock()
+	entry, ok := app.visibilityCache[cacheKey]
+	app.visibilityMu.RUnlock()
+
+	if ok {
 		if time.Now().Before(entry.expiresAt) {
 			return entry.isPublic, entry.found, nil
 		}
-		app.visibilityCache.Delete(cacheKey)
+		app.visibilityMu.Lock()
+		delete(app.visibilityCache, cacheKey)
+		app.visibilityMu.Unlock()
 	}
 
 	isPublic, found, err := app.isPackagePublic(ctx, token, parsed, repo)
@@ -164,11 +183,14 @@ func (app *App) isPackagePublicCached(ctx context.Context, token string, parsed 
 		return false, false, err
 	}
 
-	app.visibilityCache.Store(cacheKey, &visibilityCacheEntry{
+	app.visibilityMu.Lock()
+	app.visibilityCache[cacheKey] = &visibilityCacheEntry{
 		isPublic:  isPublic,
 		found:     found,
 		expiresAt: time.Now().Add(visibilityCacheTTL),
-	})
+	}
+	app.visibilityMu.Unlock()
+
 	return isPublic, found, nil
 }
 
@@ -179,6 +201,86 @@ func containsPathTraversal(path string) bool {
 		}
 	}
 	return false
+}
+
+func (app *App) recoverPanic(w http.ResponseWriter) {
+	if recovered := recover(); recovered != nil {
+		app.Logger.Error("handler panicked", "panic", recovered)
+		http.Error(w, "Server error", http.StatusInternalServerError)
+	}
+}
+
+func (app *App) authorizeArtifact(w http.ResponseWriter, r *http.Request, repo, path string) (string, bool) {
+	token, err := app.GetToken(r.Context(), "github-token")
+	if err != nil {
+		app.Logger.Error("failed to get github token", "error", err)
+		http.Error(w, "Server error", http.StatusInternalServerError)
+		return "", false
+	}
+
+	parsed, err := ParsePathAsArtifact(path)
+	if err != nil {
+		http.Error(w, "422: The file path you provided was probably invalid (not a valid Maven repository path)", http.StatusUnprocessableEntity)
+		return "", false
+	}
+
+	if !IsValidMavenCoordinate(parsed.GroupID) || !IsValidMavenCoordinate(parsed.ArtifactID) ||
+		(parsed.Version != "" && !IsValidPathSegment(parsed.Version)) ||
+		(parsed.File != "" && !IsValidPathSegment(parsed.File)) {
+		http.Error(w, "422: The file path you provided was probably invalid (not a valid Maven repository path)", http.StatusUnprocessableEntity)
+		return "", false
+	}
+
+	if !IsNavPackage(parsed.GroupID) {
+		http.Error(w, "GroupId does not start with an accepted prefix. Assuming a non NAV package", http.StatusNotFound)
+		return "", false
+	}
+
+	isPublic, _, err := app.isPackagePublicCached(r.Context(), token, parsed, repo)
+	if err != nil {
+		app.Logger.Error("failed to get package visibility", "repo", repo, "path", path, "error", err)
+	}
+	if err != nil || !isPublic {
+		http.Error(w, fmt.Sprintf("Could not get metadata for the Github repo %q in the navikt organization - it may not exist, or perhaps it's a private repository?", repo), http.StatusNotFound)
+		return "", false
+	}
+
+	return token, true
+}
+
+func (app *App) handleUpstreamError(w http.ResponseWriter, statusCode int, artifactURL string) {
+	switch statusCode {
+	case http.StatusBadRequest:
+		http.Error(w, "500 Server error: Could not authenticate with the Github Package Registry. This is probably due to a misconfiguration in Github Package Registry Mirror.", http.StatusInternalServerError)
+	case http.StatusNotFound:
+		http.Error(w, "404 Not Found: Looks like this package doesn't on Github Package Registry.", http.StatusNotFound)
+	case http.StatusUnprocessableEntity:
+		http.Error(w, "422: The file path you provided was probably invalid (not a valid Maven repository path)", http.StatusUnprocessableEntity)
+	default:
+		http.Error(w, fmt.Sprintf("Got an unexpected response from Github Package Registry %s", artifactURL), http.StatusInternalServerError)
+	}
+}
+
+func (app *App) streamAndCache(w http.ResponseWriter, ctx context.Context, body io.Reader, cacheKey string) {
+	cacheFile := app.Storage.File(cacheKey)
+	writer, err := cacheFile.NewWriter(ctx)
+	if err != nil {
+		app.Logger.Error("failed to create cache writer", "cacheKey", cacheKey, "error", err)
+		if _, copyErr := io.Copy(w, io.LimitReader(body, maxArtifactSize)); copyErr != nil {
+			app.Logger.Error("failed streaming artifact", "cacheKey", cacheKey, "error", copyErr)
+		}
+		return
+	}
+	tee := io.TeeReader(io.LimitReader(body, maxArtifactSize), writer)
+	_, copyErr := io.Copy(w, tee)
+	closeErr := writer.Close()
+	if copyErr != nil {
+		app.Logger.Error("failed streaming artifact", "cacheKey", cacheKey, "error", copyErr)
+		_ = cacheFile.Delete(ctx)
+	} else if closeErr != nil {
+		app.Logger.Error("failed writing cached artifact", "cacheKey", cacheKey, "error", closeErr)
+		_ = cacheFile.Delete(ctx)
+	}
 }
 
 func (app *App) existsInCache(ctx context.Context, cacheKey string) (bool, error) {
@@ -216,47 +318,15 @@ func (app *App) existsInCache(ctx context.Context, cacheKey string) (bool, error
 }
 
 func (app *App) handleSimple(w http.ResponseWriter, r *http.Request, repo, path string) {
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			http.Error(w, "Server error", http.StatusInternalServerError)
-		}
-	}()
+	defer app.recoverPanic(w)
 
 	if containsPathTraversal(path) || containsPathTraversal(repo) || !IsValidPathSegment(repo) {
 		http.Error(w, "422: The file path you provided was probably invalid (not a valid Maven repository path)", http.StatusUnprocessableEntity)
 		return
 	}
 
-	token, err := app.GetToken(r.Context(), "github-token")
-	if err != nil {
-		app.Logger.Error("failed to get github token", "error", err)
-		http.Error(w, "Server error", http.StatusInternalServerError)
-		return
-	}
-
-	parsed, err := ParsePathAsArtifact(path)
-	if err != nil {
-		app.Logger.Error("failed to parse artifact path", "path", path, "error", err)
-	}
-
-	if !IsValidMavenCoordinate(parsed.GroupID) || !IsValidMavenCoordinate(parsed.ArtifactID) ||
-		(parsed.Version != "" && !IsValidPathSegment(parsed.Version)) ||
-		(parsed.File != "" && !IsValidPathSegment(parsed.File)) {
-		http.Error(w, "422: The file path you provided was probably invalid (not a valid Maven repository path)", http.StatusUnprocessableEntity)
-		return
-	}
-
-	if !IsNavPackage(parsed.GroupID) {
-		http.Error(w, "GroupId does not start with an accepted prefix. Assuming a non NAV package", http.StatusNotFound)
-		return
-	}
-
-	isPublic, found, err := app.isPackagePublicCached(r.Context(), token, parsed, repo)
-	if err != nil {
-		app.Logger.Error("failed to get package visibility", "repo", repo, "path", path, "error", err)
-	}
-	if err != nil || !found || !isPublic {
-		http.Error(w, fmt.Sprintf("Could not get metadata for the Github repo %q in the navikt organization - it may not exist, or perhaps it's a private repository?", repo), http.StatusNotFound)
+	token, ok := app.authorizeArtifact(w, r, repo, path)
+	if !ok {
 		return
 	}
 
@@ -288,23 +358,13 @@ func (app *App) handleSimple(w http.ResponseWriter, r *http.Request, repo, path 
 		if _, err := io.Copy(w, io.LimitReader(resp.Body, maxArtifactSize)); err != nil {
 			app.Logger.Error("failed streaming simple response", "url", artifactURL, "error", err)
 		}
-	case http.StatusBadRequest:
-		http.Error(w, "500 Server error: Could not authenticate with the Github Package Registry. This is probably due to a misconfiguration in Github Package Registry Mirror.", http.StatusInternalServerError)
-	case http.StatusNotFound:
-		http.Error(w, "404 Not Found: Looks like this package doesn't on Github Package Registry.", http.StatusNotFound)
-	case http.StatusUnprocessableEntity:
-		http.Error(w, "422: The file path you provided was probably invalid (not a valid Maven repository path)", http.StatusUnprocessableEntity)
 	default:
-		http.Error(w, fmt.Sprintf("Got an unexpected response from Github Package Registry %s", artifactURL), http.StatusInternalServerError)
+		app.handleUpstreamError(w, resp.StatusCode, artifactURL)
 	}
 }
 
 func (app *App) handleCached(w http.ResponseWriter, r *http.Request, repo, path string) {
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			http.Error(w, "Server error", http.StatusInternalServerError)
-		}
-	}()
+	defer app.recoverPanic(w)
 
 	if containsPathTraversal(path) || containsPathTraversal(repo) || !IsValidPathSegment(repo) {
 		http.Error(w, "422: The file path you provided was probably invalid (not a valid Maven repository path)", http.StatusUnprocessableEntity)
@@ -336,36 +396,8 @@ func (app *App) handleCached(w http.ResponseWriter, r *http.Request, repo, path 
 		return
 	}
 
-	token, err := app.GetToken(r.Context(), "github-token")
-	if err != nil {
-		app.Logger.Error("failed to get github token", "error", err)
-		http.Error(w, "Server error", http.StatusInternalServerError)
-		return
-	}
-
-	parsed, err := ParsePathAsArtifact(path)
-	if err != nil {
-		app.Logger.Error("failed to parse artifact path", "path", path, "error", err)
-	}
-
-	if !IsValidMavenCoordinate(parsed.GroupID) || !IsValidMavenCoordinate(parsed.ArtifactID) ||
-		(parsed.Version != "" && !IsValidPathSegment(parsed.Version)) ||
-		(parsed.File != "" && !IsValidPathSegment(parsed.File)) {
-		http.Error(w, "422: The file path you provided was probably invalid (not a valid Maven repository path)", http.StatusUnprocessableEntity)
-		return
-	}
-
-	if !IsNavPackage(parsed.GroupID) {
-		http.Error(w, "GroupId does not start with an accepted prefix. Assuming a non NAV package", http.StatusNotFound)
-		return
-	}
-
-	isPublic, _, err := app.isPackagePublicCached(r.Context(), token, parsed, repo)
-	if err != nil {
-		app.Logger.Error("failed to get package visibility", "repo", repo, "path", path, "error", err)
-	}
-	if err != nil || !isPublic {
-		http.Error(w, fmt.Sprintf("Could not get metadata for the Github repo %q in the navikt organization - it may not exist, or perhaps it's a private repository?", repo), http.StatusNotFound)
+	token, ok := app.authorizeArtifact(w, r, repo, path)
+	if !ok {
 		return
 	}
 
@@ -386,34 +418,27 @@ func (app *App) handleCached(w http.ResponseWriter, r *http.Request, repo, path 
 
 	switch resp.StatusCode {
 	case http.StatusOK:
-		cacheFile := app.Storage.File(cacheKey)
-		writer := cacheFile.NewWriter(r.Context())
-		tee := io.TeeReader(io.LimitReader(resp.Body, maxArtifactSize), writer)
-		_, copyErr := io.Copy(w, tee)
-		closeErr := writer.Close()
-		if copyErr != nil {
-			app.Logger.Error("failed streaming upstream artifact", "url", artifactURL, "error", copyErr)
-			_ = cacheFile.Delete(r.Context())
-		} else if closeErr != nil {
-			app.Logger.Error("failed writing cached artifact", "cacheKey", cacheKey, "error", closeErr)
-			_ = cacheFile.Delete(r.Context())
-		}
+		app.streamAndCache(w, r.Context(), resp.Body, cacheKey)
 	case http.StatusMovedPermanently, http.StatusFound:
-		location := resp.Header.Get("Location")
-		locationURL, err := url.Parse(location)
+		locationURL, err := resp.Location()
 		if err != nil {
-			app.Logger.Error("failed to parse redirect location", "location", location, "error", err)
+			app.Logger.Error("failed to get redirect location", "error", err)
+			http.Error(w, "Could not fetch the artifact from Github Package Registry.", http.StatusInternalServerError)
+			return
+		}
+		if locationURL.Scheme != "https" {
+			app.Logger.Error("redirect to non-HTTPS URL", "location", locationURL.String())
 			http.Error(w, "Could not fetch the artifact from Github Package Registry.", http.StatusInternalServerError)
 			return
 		}
 		if !allowedRedirectHosts[locationURL.Hostname()] {
-			app.Logger.Warn("redirect to unexpected host", "location", location)
+			app.Logger.Warn("redirect to unexpected host", "location", locationURL.String())
 		}
 		_ = resp.Body.Close()
 
-		resp2, err := app.Fetch(r.Context(), location, http.MethodGet, http.Header{}, nil)
+		resp2, err := app.Fetch(r.Context(), locationURL.String(), http.MethodGet, http.Header{}, nil)
 		if err != nil {
-			app.Logger.Error("failed following redirect", "location", location, "error", err)
+			app.Logger.Error("failed following redirect", "location", locationURL.String(), "error", err)
 			http.Error(w, "Could not fetch the artifact from Github Package Registry.", http.StatusInternalServerError)
 			return
 		}
@@ -425,30 +450,13 @@ func (app *App) handleCached(w http.ResponseWriter, r *http.Request, repo, path 
 		}
 
 		if resp2.ContentLength > maxArtifactSize {
-			app.Logger.Error("redirected artifact too large", "location", location, "size", resp2.ContentLength)
+			app.Logger.Error("redirected artifact too large", "location", locationURL.String(), "size", resp2.ContentLength)
 			http.Error(w, "Server error", http.StatusBadGateway)
 			return
 		}
 
-		cacheFile := app.Storage.File(cacheKey)
-		writer := cacheFile.NewWriter(r.Context())
-		tee := io.TeeReader(io.LimitReader(resp2.Body, maxArtifactSize), writer)
-		_, copyErr := io.Copy(w, tee)
-		closeErr := writer.Close()
-		if copyErr != nil {
-			app.Logger.Error("failed streaming redirected artifact", "location", location, "error", copyErr)
-			_ = cacheFile.Delete(r.Context())
-		} else if closeErr != nil {
-			app.Logger.Error("failed writing redirected cached artifact", "cacheKey", cacheKey, "error", closeErr)
-			_ = cacheFile.Delete(r.Context())
-		}
-	case http.StatusBadRequest:
-		http.Error(w, "500 Server error: Could not authenticate with the Github Package Registry. This is probably due to a misconfiguration in Github Package Registry Mirror.", http.StatusInternalServerError)
-	case http.StatusNotFound:
-		http.Error(w, "404 Not Found: Looks like this package doesn't on Github Package Registry.", http.StatusNotFound)
-	case http.StatusUnprocessableEntity:
-		http.Error(w, "422: The file path you provided was probably invalid (not a valid Maven repository path)", http.StatusUnprocessableEntity)
+		app.streamAndCache(w, r.Context(), resp2.Body, cacheKey)
 	default:
-		http.Error(w, fmt.Sprintf("Got an unexpected response from Github Package Registry %s", artifactURL), http.StatusInternalServerError)
+		app.handleUpstreamError(w, resp.StatusCode, artifactURL)
 	}
 }
