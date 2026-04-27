@@ -1,0 +1,3 @@
+[tools]
+node = "24"
+gradle = "8.14.4"
