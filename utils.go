@@ -8,7 +8,10 @@ import (
 	"strings"
 )
 
-var validMavenCoordinate = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
+var (
+	validMavenCoordinate = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
+	validPathSegment     = regexp.MustCompile(`^[a-zA-Z0-9._\-+]+$`)
+)
 
 // Artifact holds parsed Maven path components.
 type Artifact struct {
@@ -38,6 +41,10 @@ func IsMavenMetadataXml(path string) bool {
 
 func IsValidMavenCoordinate(s string) bool {
 	return validMavenCoordinate.MatchString(s)
+}
+
+func IsValidPathSegment(s string) bool {
+	return validPathSegment.MatchString(s)
 }
 
 // ModifiedHeadersWithAuth creates fresh headers with Authorization.

@@ -232,3 +232,36 @@ func TestParsePathAsArtifact(t *testing.T) {
 		})
 	}
 }
+
+func TestIsValidPathSegment(t *testing.T) {
+	tests := []struct {
+		name    string
+		segment string
+		want    bool
+	}{
+		{"simple name", "my-artifact", true},
+		{"version with dots", "1.2.3", true},
+		{"version with plus", "1.0.0+build", true},
+		{"underscore", "my_artifact", true},
+		{"uppercase", "MyArtifact", true},
+		{"jar extension", "artifact-1.0.jar", true},
+		{"pom extension", "artifact-1.0.pom", true},
+		{"empty string", "", false},
+		{"path traversal dots", "..", true}, // character-valid; containsPathTraversal catches this separately
+		{"slash", "a/b", false},
+		{"backslash", `a\b`, false},
+		{"space", "a b", false},
+		{"null byte", "a\x00b", false},
+		{"colon", "a:b", false},
+		{"semicolon", "a;b", false},
+		{"question mark", "a?b", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsValidPathSegment(tt.segment)
+			if got != tt.want {
+				t.Errorf("IsValidPathSegment(%q) = %v, want %v", tt.segment, got, tt.want)
+			}
+		})
+	}
+}
