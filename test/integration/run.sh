@@ -30,7 +30,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-STORAGE_BACKEND=local STORAGE_PATH="$STORAGE_DIR" node "$REPO_ROOT/src/index.js" >"$SERVER_LOG" 2>&1 &
+STORAGE_BACKEND=local STORAGE_PATH="$STORAGE_DIR" go run "$REPO_ROOT/." >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 
 for _ in $(seq 1 20); do
