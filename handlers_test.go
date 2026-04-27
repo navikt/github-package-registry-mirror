@@ -175,8 +175,10 @@ func errorTokenFn() func(ctx context.Context, name string) (string, error) {
 	}
 }
 
-const simplePath = "/simple/tjenestespesifikasjoner/no/nav/foo/bar/1.0/bar-1.0.jar"
-const nonNavSimplePath = "/simple/commons-lang/org/apache/commons/lang3/3.0/lang3-3.0.jar"
+const (
+	simplePath       = "/simple/tjenestespesifikasjoner/no/nav/foo/bar/1.0/bar-1.0.jar"
+	nonNavSimplePath = "/simple/commons-lang/org/apache/commons/lang3/3.0/lang3-3.0.jar"
+)
 
 func TestHandleSimple(t *testing.T) {
 	storage, _ := newMockStorage(false, time.Time{}, "")
@@ -429,9 +431,11 @@ func TestHandleSimple(t *testing.T) {
 	})
 }
 
-const cachedPath = "/cached/tjenestespesifikasjoner/no/nav/foo/bar/1.0/bar-1.0.jar"
-const cachedMetadataPath = "/cached/tjenestespesifikasjoner/no/nav/foo/bar/maven-metadata.xml"
-const nonNavCachedPath = "/cached/commons-lang/org/apache/commons/lang3/3.0/lang3-3.0.jar"
+const (
+	cachedPath         = "/cached/tjenestespesifikasjoner/no/nav/foo/bar/1.0/bar-1.0.jar"
+	cachedMetadataPath = "/cached/tjenestespesifikasjoner/no/nav/foo/bar/maven-metadata.xml"
+	nonNavCachedPath   = "/cached/commons-lang/org/apache/commons/lang3/3.0/lang3-3.0.jar"
+)
 
 func TestHandleCached(t *testing.T) {
 	t.Run("cache miss upstream 200 returns 200 and stores artifact", func(t *testing.T) {
