@@ -10,7 +10,7 @@ run = "go test -race ./..."
 
 [tasks.check]
 description = "Run all linters and static analysis"
-run = "gofumpt -l . && golangci-lint run && staticcheck ./... && govulncheck ./..."
+run = "go run mvdan.cc/gofumpt@latest -l . && golangci-lint run && go run honnef.co/go/tools/cmd/staticcheck@latest ./... && go run golang.org/x/vuln/cmd/govulncheck@latest ./..."
 
 [tasks.run]
 description = "Run the server locally"

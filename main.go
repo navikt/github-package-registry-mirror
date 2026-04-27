@@ -19,7 +19,7 @@ func (h *cloudLoggingHandler) Enabled(ctx context.Context, level slog.Level) boo
 }
 
 func (h *cloudLoggingHandler) Handle(ctx context.Context, r slog.Record) error {
-	severity := "DEFAULT"
+	var severity string
 	switch {
 	case r.Level >= slog.LevelError:
 		severity = "ERROR"
@@ -28,7 +28,7 @@ func (h *cloudLoggingHandler) Handle(ctx context.Context, r slog.Record) error {
 	case r.Level >= slog.LevelInfo:
 		severity = "INFO"
 	default:
-		severity = "DEBUG"
+		severity = "DEFAULT"
 	}
 	r.AddAttrs(slog.String("severity", severity))
 	return h.handler.Handle(ctx, r)
