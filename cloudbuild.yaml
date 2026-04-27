@@ -1,21 +1,21 @@
 steps:
-  - name: 'gcr.io/cloud-builders/gcloud'
+  - name: "gcr.io/cloud-builders/gcloud"
     args:
-      - 'run'
-      - 'deploy'
-      - 'github-package-registry-mirror'
-      - '--source'
-      - '.'
-      - '--region'
-      - 'europe-north1'
-      - '--allow-unauthenticated'
-      - '--cpu'
-      - '1'
-      - '--memory'
-      - '256Mi'
-      - '--concurrency'
-      - '80'
-      - '--timeout'
-      - '900'
-      - '--max-instances'
-      - '1000'
+      - "run"
+      - "deploy"
+      - "github-package-registry-mirror"
+      - "--source"
+      - "."
+      - "--region"
+      - "europe-north1"
+      - "--allow-unauthenticated"
+      - "--cpu"
+      - "1"
+      - "--memory"
+      - "256Mi"
+      - "--concurrency"
+      - "100"
+      - "--timeout"
+      - "900s"
+      - "--max-instances"
+      - "10"
