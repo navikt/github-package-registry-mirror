@@ -287,11 +287,7 @@ function createApp(deps) {
         return handleSimple(req, res, repo, path);
     });
 
-    return {
-        get: app.get.bind(app),
-        use: app.use.bind(app),
-        listen: app.listen.bind(app)
-    };
+    return app;
 }
 
 module.exports = { createApp };
