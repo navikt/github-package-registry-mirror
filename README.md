@@ -1,17 +1,37 @@
 # Github Package Registry mirror
 
-This is a simple Maven repository/proxy that fetches public packages from Github
-and serves them here. The reason is that Github required authentication (personal access tokens)
-when fetching packages, even if the packages are public. This may be a temporary problem -
-in which case this proxy is a temporary solution.
+A Maven repository proxy that fetches public packages from Github Package Registry
+without requiring authentication. Github requires personal access tokens to fetch
+packages, even public ones — this proxy removes that requirement.
 
-### Deploying the app
+## Development
 
-Every commit to the `master`-branch will automatically be built by Google Cloud Build,
-and the resulting Docker image is deployed as a serverless function on Google Cloud Run.
+Prerequisites: [mise](https://mise.jdx.dev/)
 
-The app runs on [https://github-package-registry-mirror.gc.nav.no/](https://github-package-registry-mirror-sr4qwz23da-ew.a.run.app/).
+```bash
+mise install          # Install Go, golangci-lint, Gradle, Java
+mise run test         # Run unit tests
+mise run check        # Run gofumpt, golangci-lint, staticcheck, govulncheck
+mise run run          # Start the server locally on :8080
+mise run test:integration  # Run integration test (requires GITHUB_TOKEN)
+```
+
+### Environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `PORT` | `8080` | HTTP listen port |
+| `STORAGE_BACKEND` | `gcs` | `gcs` or `local` |
+| `STORAGE_PATH` | — | Directory for local storage backend |
+
+## Deploying
+
+Every commit to `master` is automatically built by Google Cloud Build and deployed
+to Google Cloud Run using deploy-from-source.
+
+The app runs on [https://github-package-registry-mirror.gc.nav.no/](https://github-package-registry-mirror.gc.nav.no/).
 
 ## Cache
 
-Artifacts from GitHub are cached in an object store.
+Artifacts from GitHub are cached in a GCS bucket. `maven-metadata.xml` files are
+refreshed after 15 minutes; all other artifacts are cached indefinitely.
