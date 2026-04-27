@@ -7,6 +7,7 @@ repositories {
         url = uri("http://localhost:${project.findProperty("mirrorPort") ?: "8080"}/cached/tjenestespesifikasjoner")
         isAllowInsecureProtocol = true
     }
+    mavenCentral()
 }
 
 dependencies {
