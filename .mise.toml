@@ -1,8 +1,9 @@
 [tools]
-go = "1.24"
+go = "1.26.2"
 golangci-lint = "latest"
 gradle = "8.14.4"
 java = "temurin-21"
+opentofu = "1.10.7"
 
 [tasks.test]
 description = "Run unit tests"
