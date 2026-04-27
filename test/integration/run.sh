@@ -57,7 +57,7 @@ for _ in $(seq 1 10); do
   sleep 0.5
 done
 
-echo "Running Gradle dependency resolution..."
+echo "Running Gradle dependency resolution (first run — populates cache)..."
 cd "$SCRIPT_DIR/gradle-app"
 if ! gradle resolveDeps -PmirrorPort="$PORT" --no-daemon --stacktrace; then
   echo ""
@@ -65,5 +65,40 @@ if ! gradle resolveDeps -PmirrorPort="$PORT" --no-daemon --stacktrace; then
   cat "$SERVER_LOG" >&2
   exit 1
 fi
+
+# Verify artifacts were cached to local storage
+CACHED_FILES=$(find "$STORAGE_DIR/cache" -type f 2>/dev/null | wc -l | tr -d ' ')
+if [ "$CACHED_FILES" -eq 0 ]; then
+  echo "ERROR: No files found in cache after first run" >&2
+  exit 1
+fi
+echo "Cache populated with $CACHED_FILES file(s)"
+
+# Clear Gradle's local cache so it must re-fetch from the mirror
+rm -rf "$GRADLE_HOME_DIR"
+GRADLE_HOME_DIR="$(mktemp -d)"
+export GRADLE_USER_HOME="$GRADLE_HOME_DIR"
+
+# Record log position before second run
+LOG_OFFSET=$(wc -c < "$SERVER_LOG" | tr -d ' ')
+
+echo "Running Gradle dependency resolution (second run — should read from cache)..."
+if ! gradle resolveDeps -PmirrorPort="$PORT" --no-daemon --stacktrace; then
+  echo ""
+  echo "--- server log ---" >&2
+  cat "$SERVER_LOG" >&2
+  exit 1
+fi
+
+# Verify cache hits appeared in the server log during the second run
+SECOND_RUN_LOG=$(tail -c +"$((LOG_OFFSET + 1))" "$SERVER_LOG")
+CACHE_HITS=$(echo "$SECOND_RUN_LOG" | grep -c '"serving from cache"' || true)
+if [ "$CACHE_HITS" -eq 0 ]; then
+  echo "ERROR: No cache hits during second run" >&2
+  echo "--- server log (second run) ---" >&2
+  echo "$SECOND_RUN_LOG" >&2
+  exit 1
+fi
+echo "Second run served $CACHE_HITS artifact(s) from cache"
 
 echo "Integration test passed."
