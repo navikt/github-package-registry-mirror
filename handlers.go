@@ -103,9 +103,9 @@ func (app *App) CheckToken(ctx context.Context) error {
 	return nil
 }
 
-func (app *App) isPackagePublic(ctx context.Context, token string, parsed Artifact, repo string) (bool, error) {
+func (app *App) isPackagePublic(ctx context.Context, token string, parsed Artifact) (bool, error) {
 	packageName := parsed.GroupID + "." + parsed.ArtifactID
-	query := `query($name: [String!]!) { organization(login:"navikt"){ packages(first:1,names:$name){ nodes{ repository{ name isPrivate } } } } }`
+	query := `query($name: [String!]!) { organization(login:"navikt"){ packages(first:1,names:$name){ nodes{ repository{ isPrivate } } } } }`
 	payload, err := json.Marshal(map[string]any{
 		"query":     query,
 		"variables": map[string]any{"name": []string{packageName}},
@@ -139,8 +139,7 @@ func (app *App) isPackagePublic(ctx context.Context, token string, parsed Artifa
 				Packages struct {
 					Nodes []struct {
 						Repository *struct {
-							Name      string `json:"name"`
-							IsPrivate bool   `json:"isPrivate"`
+							IsPrivate bool `json:"isPrivate"`
 						} `json:"repository"`
 					} `json:"nodes"`
 				} `json:"packages"`
@@ -180,18 +179,13 @@ func (app *App) isPackagePublic(ctx context.Context, token string, parsed Artifa
 		return false, nil
 	}
 
-	if !strings.EqualFold(node.Repository.Name, repo) {
-		app.Logger.Warn("package repository mismatch", "expected", repo, "got", node.Repository.Name)
-		return false, nil
-	}
-
 	return !node.Repository.IsPrivate, nil
 }
 
 const visibilityCacheTTL = 5 * time.Minute
 
-func (app *App) isPackagePublicCached(ctx context.Context, token string, parsed Artifact, repo string) (bool, error) {
-	cacheKey := repo + ":" + parsed.GroupID + "." + parsed.ArtifactID
+func (app *App) isPackagePublicCached(ctx context.Context, token string, parsed Artifact) (bool, error) {
+	cacheKey := parsed.GroupID + "." + parsed.ArtifactID
 
 	app.visibilityMu.RLock()
 	entry, ok := app.visibilityCache[cacheKey]
@@ -201,7 +195,7 @@ func (app *App) isPackagePublicCached(ctx context.Context, token string, parsed 
 		return entry.isPublic, nil
 	}
 
-	isPublic, err := app.isPackagePublic(ctx, token, parsed, repo)
+	isPublic, err := app.isPackagePublic(ctx, token, parsed)
 	if err != nil {
 		return false, err
 	}
@@ -257,7 +251,7 @@ func (app *App) authorizeArtifact(w http.ResponseWriter, r *http.Request, repo, 
 		return "", false
 	}
 
-	isPublic, err := app.isPackagePublicCached(r.Context(), app.token, parsed, repo)
+	isPublic, err := app.isPackagePublicCached(r.Context(), app.token, parsed)
 	if err != nil {
 		app.Logger.Error("failed to get package visibility", "repo", repo, "path", path, "error", err)
 	}

@@ -879,7 +879,7 @@ func TestBug7_UnboundedVisibilityCache(t *testing.T) {
 	}
 
 	// Lookup one key — triggers eviction of only that key
-	_, _ = app.isPackagePublicCached(context.Background(), "token", Artifact{GroupID: "no.nav.pkg0", ArtifactID: "artifact0"}, "repo")
+	_, _ = app.isPackagePublicCached(context.Background(), "token", Artifact{GroupID: "no.nav.pkg0", ArtifactID: "artifact0"})
 
 	app.visibilityMu.RLock()
 	remaining := len(app.visibilityCache)
