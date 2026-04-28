@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -72,7 +73,7 @@ func main() {
 		}
 	}
 
-	token := os.Getenv("GITHUB_TOKEN")
+	token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
 	if token == "" {
 		logger.Error("GITHUB_TOKEN environment variable is required")
 		os.Exit(1)
