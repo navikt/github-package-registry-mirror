@@ -32,7 +32,7 @@ func IsNavPackage(groupID string) bool {
 		strings.HasPrefix(groupID, "no.stelvio")
 }
 
-func IsMavenMetadataXml(path string) bool {
+func IsMavenMetadataXML(path string) bool {
 	return strings.HasSuffix(path, "/maven-metadata.xml") || path == "maven-metadata.xml"
 }
 

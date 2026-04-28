@@ -276,7 +276,7 @@ func (app *App) existsInCache(ctx context.Context, cacheKey string) (bool, error
 		return false, nil
 	}
 
-	if !IsMavenMetadataXml(cacheKey) {
+	if !IsMavenMetadataXML(cacheKey) {
 		return true, nil
 	}
 
@@ -459,8 +459,7 @@ func (app *App) handleCached(w http.ResponseWriter, r *http.Request, repo, path 
 				http.Error(w, "Server error", http.StatusBadGateway)
 				return
 			}
-			var ue *upstreamError
-			if errors.As(sfErr, &ue) {
+			if ue, ok := errors.AsType[*upstreamError](sfErr); ok {
 				app.handleUpstreamError(w, ue.statusCode, ue.url)
 				return
 			}
