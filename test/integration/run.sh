@@ -20,8 +20,6 @@ if [ -z "${GITHUB_TOKEN:-}" ]; then
   exit 1
 fi
 
-echo "$GITHUB_TOKEN" >"$REPO_ROOT/github-token"
-
 STORAGE_DIR="$(mktemp -d)"
 SERVER_LOG="$STORAGE_DIR/server.log"
 GRADLE_HOME_DIR="$(mktemp -d)"
@@ -29,14 +27,13 @@ export GRADLE_USER_HOME="$GRADLE_HOME_DIR"
 
 cleanup() {
   [ -n "${SERVER_PID:-}" ] && kill "$SERVER_PID" 2>/dev/null || true
-  rm -f "$REPO_ROOT/github-token"
   rm -rf "$STORAGE_DIR"
   rm -rf "$GRADLE_HOME_DIR"
 }
 trap cleanup EXIT
 
 go build -o "$STORAGE_DIR/mirror" "$REPO_ROOT/."
-PORT=0 STORAGE_BACKEND=local STORAGE_PATH="$STORAGE_DIR" "$STORAGE_DIR/mirror" >"$SERVER_LOG" 2>&1 &
+PORT=0 STORAGE_BACKEND=local STORAGE_PATH="$STORAGE_DIR" GITHUB_TOKEN="$GITHUB_TOKEN" "$STORAGE_DIR/mirror" >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 
 for _ in $(seq 1 20); do

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -30,7 +29,7 @@ type visibilityCacheEntry struct {
 
 type App struct {
 	Fetch           func(ctx context.Context, url string, method string, headers http.Header, body io.Reader) (*http.Response, error)
-	GetToken        func(ctx context.Context, name string) (string, error)
+	GetToken        func() (string, error)
 	Storage         Storage
 	Logger          *slog.Logger
 	visibilityMu    sync.RWMutex
@@ -54,36 +53,18 @@ func NewDefaultApp(storage Storage, logger *slog.Logger) *App {
 			req.Header = headers
 			return client.Do(req)
 		},
-		GetToken:        realGetToken(storage),
+		GetToken:        realGetToken,
 		Storage:         storage,
 		Logger:          logger,
 		visibilityCache: make(map[string]*visibilityCacheEntry),
 	}
 }
 
-func realGetToken(storage Storage) func(ctx context.Context, name string) (string, error) {
-	return func(ctx context.Context, tokenName string) (string, error) {
-		data, err := os.ReadFile(tokenName)
-		if err == nil {
-			return strings.TrimSpace(string(data)), nil
-		}
-		if !errors.Is(err, os.ErrNotExist) {
-			return "", err
-		}
-
-		reader, err := storage.File("credentials/" + tokenName).NewReader(ctx)
-		if err != nil {
-			return "", err
-		}
-		defer reader.Close()
-
-		data, err = io.ReadAll(reader)
-		if err != nil {
-			return "", err
-		}
-
-		return strings.TrimSpace(string(data)), nil
+func realGetToken() (string, error) {
+	if v := os.Getenv("GITHUB_TOKEN"); v != "" {
+		return strings.TrimSpace(v), nil
 	}
+	return "", fmt.Errorf("GITHUB_TOKEN not set")
 }
 
 func (app *App) isPackagePublic(ctx context.Context, token string, parsed Artifact, repo string) (bool, error) {
@@ -221,7 +202,7 @@ func (app *App) recoverPanic(w http.ResponseWriter) {
 }
 
 func (app *App) authorizeArtifact(w http.ResponseWriter, r *http.Request, repo, path string) (string, bool) {
-	token, err := app.GetToken(r.Context(), "github-token")
+	token, err := app.GetToken()
 	if err != nil {
 		app.Logger.Error("failed to get github token", "error", err)
 		http.Error(w, "Server error", http.StatusInternalServerError)

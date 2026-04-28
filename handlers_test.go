@@ -145,7 +145,7 @@ func newMockStorage(exists bool, timeCreated time.Time, content string) (*mockSt
 }
 
 // newTestServer creates an httptest.Server with an App using mock dependencies.
-func newTestServer(fetch func(ctx context.Context, url string, method string, headers http.Header, body io.Reader) (*http.Response, error), getToken func(ctx context.Context, name string) (string, error), storage Storage) *httptest.Server {
+func newTestServer(fetch func(ctx context.Context, url string, method string, headers http.Header, body io.Reader) (*http.Response, error), getToken func() (string, error), storage Storage) *httptest.Server {
 	logger := slog.New(slog.DiscardHandler)
 	app := &App{
 		Fetch:           fetch,
@@ -165,15 +165,14 @@ func newTestServer(fetch func(ctx context.Context, url string, method string, he
 }
 
 // tokenFn returns a GetToken function that always returns the given token.
-func tokenFn(token string) func(ctx context.Context, name string) (string, error) {
-	return func(ctx context.Context, name string) (string, error) {
+func tokenFn(token string) func() (string, error) {
+	return func() (string, error) {
 		return token, nil
 	}
 }
 
-// errorTokenFn returns a GetToken function that always returns an error.
-func errorTokenFn() func(ctx context.Context, name string) (string, error) {
-	return func(ctx context.Context, name string) (string, error) {
+func errorTokenFn() func() (string, error) {
+	return func() (string, error) {
 		return "", fmt.Errorf("token error: boom")
 	}
 }

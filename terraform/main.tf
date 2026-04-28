@@ -48,6 +48,7 @@ resource "google_project_service" "apis" {
     "iam.googleapis.com",
     "run.googleapis.com",
     "artifactregistry.googleapis.com",
+    "secretmanager.googleapis.com",
   ])
   service = each.value
 }
@@ -114,6 +115,44 @@ resource "google_project_iam_member" "cloudbuild" {
   role    = each.value
   member  = "serviceAccount:${google_service_account.cloudbuild.email}"
 }
+
+# --- Secret Manager ---
+
+resource "google_secret_manager_secret" "github_token" {
+  secret_id = "github-token"
+
+  replication {
+    user_managed {
+      replicas {
+        location = local.region
+      }
+    }
+  }
+
+  depends_on = [google_project_service.apis]
+}
+
+# --- Cloud Run service account ---
+
+resource "google_service_account" "cloud_run" {
+  account_id   = "cloud-run-mirror"
+  display_name = "Cloud Run mirror service"
+  depends_on   = [google_project_service.apis]
+}
+
+resource "google_secret_manager_secret_iam_member" "cloud_run_token_access" {
+  secret_id = google_secret_manager_secret.github_token.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.cloud_run.email}"
+}
+
+resource "google_storage_bucket_iam_member" "cloud_run_cache_access" {
+  bucket = google_storage_bucket.mirror-cache.name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.cloud_run.email}"
+}
+
+# --- Cloud Build ---
 
 resource "google_cloudbuild_trigger" "build-trigger" {
   location        = local.region
