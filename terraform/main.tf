@@ -1,28 +1,62 @@
-provider "google-beta" {
-  credentials = file("service-account-credentials.json")
-  project     = "github-package-registry-mirror"
-  region      = "europe-north1"
+terraform {
+  required_version = ">= 1.8.0"
+
+  backend "gcs" {
+    bucket                      = "github-package-registry-mirror-tfstate"
+    impersonate_service_account = "terraformer@github-package-registry-mirror.iam.gserviceaccount.com"
+  }
+
+  required_providers {
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 7.0"
+    }
+    google-beta = {
+      source  = "hashicorp/google-beta"
+      version = "~> 7.0"
+    }
+  }
 }
 
-resource "google_storage_bucket" "mirror-cache" {
+locals {
   project = "github-package-registry-mirror"
+  region  = "europe-north1"
+}
+
+provider "google" {
+  project                     = local.project
+  region                      = local.region
+  impersonate_service_account = "terraformer@github-package-registry-mirror.iam.gserviceaccount.com"
+}
+
+provider "google-beta" {
+  project                     = local.project
+  region                      = local.region
+  impersonate_service_account = "terraformer@github-package-registry-mirror.iam.gserviceaccount.com"
+}
+
+# --- Existing resources (preserve in state) ---
+
+resource "google_storage_bucket" "mirror-cache" {
+  project  = local.project
   name     = "github-package-registry-storage"
-  location = "europe-north1"
+  location = local.region
 }
 
 resource "google_project_service" "cloudbuild" {
-  project = "github-package-registry-mirror"
+  project = local.project
   service = "cloudbuild.googleapis.com"
 }
+
 resource "google_project_service" "run" {
-  project = "github-package-registry-mirror"
+  project = local.project
   service = "run.googleapis.com"
 }
 
 resource "google_cloud_run_service" "default" {
-  project = "github-package-registry-mirror"
-  name = "github-package-registry-mirror"
-  location = "europe-north1"
+  project  = local.project
+  name     = "github-package-registry-mirror"
+  location = local.region
 
   template {
     spec {
@@ -36,43 +70,76 @@ resource "google_cloud_run_service" "default" {
     ignore_changes = [
       traffic,
       metadata,
-      template
+      template,
     ]
   }
 }
 
 resource "google_cloud_run_domain_mapping" "default" {
-  project = "github-package-registry-mirror"
-  location = "europe-north1"
+  project  = local.project
+  location = local.region
   name     = "github-package-registry-mirror.gc.nav.no"
 
   metadata {
-    namespace = "github-package-registry-mirror"
+    namespace = local.project
   }
 
   spec {
     route_name = google_cloud_run_service.default.name
   }
+
+  lifecycle {
+    ignore_changes = [
+      metadata,
+    ]
+  }
 }
 
 resource "google_container_registry" "registry" {
-  project  = "github-package-registry-mirror"
+  project  = local.project
   location = "EU"
 }
 
 resource "google_cloudbuild_trigger" "build-trigger" {
-  provider = google-beta
+  project = local.project
 
   github {
     owner = "navikt"
-    name = "github-package-registry-mirror"
+    name  = "github-package-registry-mirror"
     push {
       branch = "master"
     }
   }
 
-  substitutions = {
-  }
+  substitutions = {}
 
   filename = "cloudbuild.yaml"
+}
+
+# --- New resources ---
+
+resource "google_project_service" "artifactregistry" {
+  project = local.project
+  service = "artifactregistry.googleapis.com"
+}
+
+resource "google_cloud_run_v2_service" "go-rewrite" {
+  name                = "github-package-registry-mirror-v2"
+  location            = local.region
+  deletion_protection = false
+
+  template {
+    containers {
+      image = "us-docker.pkg.dev/cloudrun/container/hello"
+    }
+  }
+
+  lifecycle {
+    ignore_changes = [
+      template,
+      traffic,
+    ]
+  }
+
+  depends_on = [google_project_service.run]
 }

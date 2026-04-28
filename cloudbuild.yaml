@@ -3,7 +3,7 @@ steps:
     args:
       - "run"
       - "deploy"
-      - "github-package-registry-mirror"
+      - "github-package-registry-mirror-v2"
       - "--source"
       - "."
       - "--region"
