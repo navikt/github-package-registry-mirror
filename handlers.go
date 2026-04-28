@@ -20,9 +20,10 @@ import (
 const defaultMaxArtifactSize = 512 << 20 // 512 MB
 
 var allowedRedirectHosts = map[string]bool{
-	"maven.pkg.github.com":                 true,
-	"objects.githubusercontent.com":        true,
-	"pkg-containers.githubusercontent.com": true,
+	"maven.pkg.github.com":                        true,
+	"objects.githubusercontent.com":               true,
+	"pkg-containers.githubusercontent.com":        true,
+	"github-registry-files.githubusercontent.com": true,
 }
 
 var (
@@ -395,6 +396,7 @@ func (app *App) fetchAndCache(ctx context.Context, repo, path, cacheKey string) 
 
 func (app *App) handleSimple(w http.ResponseWriter, r *http.Request, repo, path string) {
 	defer app.recoverPanic(w)
+	path = strings.TrimRight(path, "/")
 
 	if containsPathTraversal(path) || containsPathTraversal(repo) || !IsValidPathSegment(repo) {
 		http.Error(w, "422: The file path you provided was probably invalid (not a valid Maven repository path)", http.StatusUnprocessableEntity)
@@ -441,6 +443,7 @@ func (app *App) handleSimple(w http.ResponseWriter, r *http.Request, repo, path 
 
 func (app *App) handleCached(w http.ResponseWriter, r *http.Request, repo, path string) {
 	defer app.recoverPanic(w)
+	path = strings.TrimRight(path, "/")
 
 	if containsPathTraversal(path) || containsPathTraversal(repo) || !IsValidPathSegment(repo) {
 		http.Error(w, "422: The file path you provided was probably invalid (not a valid Maven repository path)", http.StatusUnprocessableEntity)

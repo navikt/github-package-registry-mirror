@@ -210,3 +210,147 @@ resource "google_logging_metric" "health_check_failure" {
     value_type  = "INT64"
   }
 }
+
+# --- Dashboard ---
+
+resource "google_monitoring_dashboard" "mirror" {
+  dashboard_json = <<-EOF
+    {
+      "displayName": "GitHub Package Registry Mirror",
+      "mosaicLayout": {
+        "columns": 48,
+        "tiles": [
+          {
+            "width": 24, "height": 16,
+            "widget": {
+              "title": "Cache Hit / Miss",
+              "xyChart": {
+                "dataSets": [
+                  {
+                    "timeSeriesQuery": { "timeSeriesFilter": {
+                      "filter": "metric.type=\"logging.googleapis.com/user/mirror/cache_hit\" resource.type=\"cloud_run_revision\"",
+                      "aggregation": { "alignmentPeriod": "60s", "perSeriesAligner": "ALIGN_RATE", "crossSeriesReducer": "REDUCE_SUM" }
+                    }},
+                    "plotType": "STACKED_AREA", "legendTemplate": "Cache Hit", "targetAxis": "Y1"
+                  },
+                  {
+                    "timeSeriesQuery": { "timeSeriesFilter": {
+                      "filter": "metric.type=\"logging.googleapis.com/user/mirror/cache_miss\" resource.type=\"cloud_run_revision\"",
+                      "aggregation": { "alignmentPeriod": "60s", "perSeriesAligner": "ALIGN_RATE", "crossSeriesReducer": "REDUCE_SUM" }
+                    }},
+                    "plotType": "STACKED_AREA", "legendTemplate": "Cache Miss", "targetAxis": "Y1"
+                  }
+                ],
+                "yAxis": { "label": "req/s", "scale": "LINEAR" }
+              }
+            }
+          },
+          {
+            "xPos": 24, "width": 24, "height": 16,
+            "widget": {
+              "title": "Request Count (by response code)",
+              "xyChart": {
+                "dataSets": [
+                  {
+                    "timeSeriesQuery": { "timeSeriesFilter": {
+                      "filter": "metric.type=\"run.googleapis.com/request_count\" resource.type=\"cloud_run_revision\" resource.labels.service_name=\"github-package-registry-mirror\"",
+                      "aggregation": { "alignmentPeriod": "60s", "perSeriesAligner": "ALIGN_RATE", "crossSeriesReducer": "REDUCE_SUM", "groupByFields": ["metric.labels.response_code_class"] }
+                    }},
+                    "plotType": "STACKED_BAR", "legendTemplate": "$${metric.labels.response_code_class}", "targetAxis": "Y1"
+                  }
+                ],
+                "yAxis": { "label": "req/s", "scale": "LINEAR" }
+              }
+            }
+          },
+          {
+            "yPos": 16, "width": 24, "height": 16,
+            "widget": {
+              "title": "Request Latency (p50 / p95 / p99)",
+              "xyChart": {
+                "dataSets": [
+                  {
+                    "timeSeriesQuery": { "timeSeriesFilter": {
+                      "filter": "metric.type=\"run.googleapis.com/request_latencies\" resource.type=\"cloud_run_revision\" resource.labels.service_name=\"github-package-registry-mirror\"",
+                      "aggregation": { "alignmentPeriod": "60s", "perSeriesAligner": "ALIGN_PERCENTILE_50", "crossSeriesReducer": "REDUCE_PERCENTILE_50" }
+                    }},
+                    "plotType": "LINE", "legendTemplate": "p50", "targetAxis": "Y1"
+                  },
+                  {
+                    "timeSeriesQuery": { "timeSeriesFilter": {
+                      "filter": "metric.type=\"run.googleapis.com/request_latencies\" resource.type=\"cloud_run_revision\" resource.labels.service_name=\"github-package-registry-mirror\"",
+                      "aggregation": { "alignmentPeriod": "60s", "perSeriesAligner": "ALIGN_PERCENTILE_95", "crossSeriesReducer": "REDUCE_PERCENTILE_95" }
+                    }},
+                    "plotType": "LINE", "legendTemplate": "p95", "targetAxis": "Y1"
+                  },
+                  {
+                    "timeSeriesQuery": { "timeSeriesFilter": {
+                      "filter": "metric.type=\"run.googleapis.com/request_latencies\" resource.type=\"cloud_run_revision\" resource.labels.service_name=\"github-package-registry-mirror\"",
+                      "aggregation": { "alignmentPeriod": "60s", "perSeriesAligner": "ALIGN_PERCENTILE_99", "crossSeriesReducer": "REDUCE_PERCENTILE_99" }
+                    }},
+                    "plotType": "LINE", "legendTemplate": "p99", "targetAxis": "Y1"
+                  }
+                ],
+                "yAxis": { "label": "ms", "scale": "LINEAR" }
+              }
+            }
+          },
+          {
+            "xPos": 24, "yPos": 16, "width": 24, "height": 16,
+            "widget": {
+              "title": "Upstream Errors",
+              "xyChart": {
+                "dataSets": [
+                  {
+                    "timeSeriesQuery": { "timeSeriesFilter": {
+                      "filter": "metric.type=\"logging.googleapis.com/user/mirror/upstream_error\" resource.type=\"cloud_run_revision\"",
+                      "aggregation": { "alignmentPeriod": "60s", "perSeriesAligner": "ALIGN_RATE", "crossSeriesReducer": "REDUCE_SUM" }
+                    }},
+                    "plotType": "LINE", "legendTemplate": "Upstream Errors", "targetAxis": "Y1"
+                  }
+                ],
+                "yAxis": { "label": "errors/s", "scale": "LINEAR" }
+              }
+            }
+          },
+          {
+            "yPos": 32, "width": 24, "height": 16,
+            "widget": {
+              "title": "Instance Count",
+              "xyChart": {
+                "dataSets": [
+                  {
+                    "timeSeriesQuery": { "timeSeriesFilter": {
+                      "filter": "metric.type=\"run.googleapis.com/container/instance_count\" resource.type=\"cloud_run_revision\" resource.labels.service_name=\"github-package-registry-mirror\"",
+                      "aggregation": { "alignmentPeriod": "60s", "perSeriesAligner": "ALIGN_MAX", "crossSeriesReducer": "REDUCE_SUM", "groupByFields": ["metric.labels.state"] }
+                    }},
+                    "plotType": "STACKED_AREA", "legendTemplate": "$${metric.labels.state}", "targetAxis": "Y1"
+                  }
+                ],
+                "yAxis": { "label": "instances", "scale": "LINEAR" }
+              }
+            }
+          },
+          {
+            "xPos": 24, "yPos": 32, "width": 24, "height": 16,
+            "widget": {
+              "title": "Health Check Failures",
+              "xyChart": {
+                "dataSets": [
+                  {
+                    "timeSeriesQuery": { "timeSeriesFilter": {
+                      "filter": "metric.type=\"logging.googleapis.com/user/mirror/health_check_failure\" resource.type=\"cloud_run_revision\"",
+                      "aggregation": { "alignmentPeriod": "60s", "perSeriesAligner": "ALIGN_RATE", "crossSeriesReducer": "REDUCE_SUM" }
+                    }},
+                    "plotType": "LINE", "legendTemplate": "Health Check Failures", "targetAxis": "Y1"
+                  }
+                ],
+                "yAxis": { "label": "failures/s", "scale": "LINEAR" }
+              }
+            }
+          }
+        ]
+      }
+    }
+  EOF
+}
