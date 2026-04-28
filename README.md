@@ -26,7 +26,7 @@ mise run test:integration  # Run integration test (requires GITHUB_TOKEN)
 
 ## Deploying
 
-Every commit to `master` is automatically built by Google Cloud Build and deployed
+Every commit to `main` is automatically built by Google Cloud Build and deployed
 to Google Cloud Run using deploy-from-source.
 
 The app runs on [https://github-package-registry-mirror.gc.nav.no/](https://github-package-registry-mirror.gc.nav.no/).

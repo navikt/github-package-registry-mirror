@@ -116,13 +116,14 @@ resource "google_project_iam_member" "cloudbuild" {
 }
 
 resource "google_cloudbuild_trigger" "build-trigger" {
+  location        = local.region
   service_account = google_service_account.cloudbuild.id
 
   github {
     owner = "navikt"
     name  = "github-package-registry-mirror"
     push {
-      branch = "master"
+      branch = "main"
     }
   }
 
