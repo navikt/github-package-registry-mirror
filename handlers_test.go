@@ -145,13 +145,13 @@ func newMockStorage(exists bool, timeCreated time.Time, content string) (*mockSt
 }
 
 // newTestServer creates an httptest.Server with an App using mock dependencies.
-func newTestServer(fetch func(ctx context.Context, url string, method string, headers http.Header, body io.Reader) (*http.Response, error), getToken func() (string, error), storage Storage) *httptest.Server {
+func newTestServer(fetch func(ctx context.Context, url string, method string, headers http.Header, body io.Reader) (*http.Response, error), token string, storage Storage) *httptest.Server {
 	logger := slog.New(slog.DiscardHandler)
 	app := &App{
 		Fetch:           fetch,
-		GetToken:        getToken,
 		Storage:         storage,
 		Logger:          logger,
+		token:           token,
 		visibilityCache: make(map[string]*visibilityCacheEntry),
 	}
 	mux := http.NewServeMux()
@@ -162,19 +162,6 @@ func newTestServer(fetch func(ctx context.Context, url string, method string, he
 		app.handleCached(w, r, r.PathValue("repo"), r.PathValue("path"))
 	})
 	return httptest.NewServer(mux)
-}
-
-// tokenFn returns a GetToken function that always returns the given token.
-func tokenFn(token string) func() (string, error) {
-	return func() (string, error) {
-		return token, nil
-	}
-}
-
-func errorTokenFn() func() (string, error) {
-	return func() (string, error) {
-		return "", fmt.Errorf("token error: boom")
-	}
 }
 
 const (
@@ -209,7 +196,7 @@ func TestHandleSimple(t *testing.T) {
 			}{url, headers.Clone(), string(bodyBytes)})
 			return fetch(ctx, url, method, headers, body)
 		}
-		srv := newTestServer(fetchWrapper, tokenFn(token), storage)
+		srv := newTestServer(fetchWrapper, token, storage)
 		defer srv.Close()
 
 		resp, err := http.Get(srv.URL + simplePath)
@@ -261,7 +248,7 @@ func TestHandleSimple(t *testing.T) {
 			publicGraphQLResponse(),
 			artifactResponse(301, "", locationHeaders),
 		)
-		srv := newTestServer(fetch, tokenFn("token"), storage)
+		srv := newTestServer(fetch, "token", storage)
 		defer srv.Close()
 
 		client := &http.Client{CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -286,7 +273,7 @@ func TestHandleSimple(t *testing.T) {
 			t.Errorf("fetch should not be called for non-NAV packages, called with %q", url)
 			return nil, fmt.Errorf("unexpected call")
 		}
-		srv := newTestServer(panicFetch, tokenFn("token"), storage)
+		srv := newTestServer(panicFetch, "token", storage)
 		defer srv.Close()
 
 		resp, err := http.Get(srv.URL + nonNavSimplePath)
@@ -312,7 +299,7 @@ func TestHandleSimple(t *testing.T) {
 			}
 			return mockFetch(privateGraphQLResponse())(ctx, url, method, headers, body)
 		}
-		srv := newTestServer(fetch, tokenFn("token"), storage)
+		srv := newTestServer(fetch, "token", storage)
 		defer srv.Close()
 
 		resp, err := http.Get(srv.URL + simplePath)
@@ -335,7 +322,7 @@ func TestHandleSimple(t *testing.T) {
 
 	t.Run("returns 404 when package metadata is not found", func(t *testing.T) {
 		fetch := mockFetch(packageNotFoundGraphQLResponse())
-		srv := newTestServer(fetch, tokenFn("token"), storage)
+		srv := newTestServer(fetch, "token", storage)
 		defer srv.Close()
 
 		resp, err := http.Get(srv.URL + simplePath)
@@ -355,7 +342,7 @@ func TestHandleSimple(t *testing.T) {
 
 	t.Run("maps upstream 400 to client 500", func(t *testing.T) {
 		fetch := mockFetch(publicGraphQLResponse(), artifactResponse(400, "bad credentials"))
-		srv := newTestServer(fetch, tokenFn("token"), storage)
+		srv := newTestServer(fetch, "token", storage)
 		defer srv.Close()
 
 		resp, err := http.Get(srv.URL + simplePath)
@@ -375,7 +362,7 @@ func TestHandleSimple(t *testing.T) {
 
 	t.Run("maps upstream 404 to client 404 (bug fix)", func(t *testing.T) {
 		fetch := mockFetch(publicGraphQLResponse(), artifactResponse(404, "missing artifact"))
-		srv := newTestServer(fetch, tokenFn("token"), storage)
+		srv := newTestServer(fetch, "token", storage)
 		defer srv.Close()
 
 		resp, err := http.Get(srv.URL + simplePath)
@@ -395,7 +382,7 @@ func TestHandleSimple(t *testing.T) {
 
 	t.Run("preserves upstream 422 responses", func(t *testing.T) {
 		fetch := mockFetch(publicGraphQLResponse(), artifactResponse(422, "invalid path"))
-		srv := newTestServer(fetch, tokenFn("token"), storage)
+		srv := newTestServer(fetch, "token", storage)
 		defer srv.Close()
 
 		resp, err := http.Get(srv.URL + simplePath)
@@ -415,7 +402,7 @@ func TestHandleSimple(t *testing.T) {
 
 	t.Run("maps unexpected upstream statuses to client 500", func(t *testing.T) {
 		fetch := mockFetch(publicGraphQLResponse(), artifactResponse(429, "rate limited"))
-		srv := newTestServer(fetch, tokenFn("token"), storage)
+		srv := newTestServer(fetch, "token", storage)
 		defer srv.Close()
 
 		resp, err := http.Get(srv.URL + simplePath)
@@ -433,35 +420,12 @@ func TestHandleSimple(t *testing.T) {
 		}
 	})
 
-	t.Run("returns 500 when token lookup throws", func(t *testing.T) {
-		panicFetch := func(ctx context.Context, url string, method string, headers http.Header, body io.Reader) (*http.Response, error) {
-			t.Errorf("fetch should not be called when token lookup fails, called with %q", url)
-			return nil, fmt.Errorf("unexpected call")
-		}
-		srv := newTestServer(panicFetch, errorTokenFn(), storage)
-		defer srv.Close()
-
-		resp, err := http.Get(srv.URL + simplePath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != 500 {
-			t.Errorf("status = %d, want 500", resp.StatusCode)
-		}
-		body, _ := io.ReadAll(resp.Body)
-		if strings.TrimSpace(string(body)) != "Server error" {
-			t.Errorf("body = %q, want 'Server error'", body)
-		}
-	})
-
 	t.Run("returns 422 for invalid maven coordinates in simple path", func(t *testing.T) {
 		panicFetch := func(ctx context.Context, url string, method string, headers http.Header, body io.Reader) (*http.Response, error) {
 			t.Errorf("fetch should not be called for invalid coordinates, called with %q", url)
 			return nil, fmt.Errorf("unexpected call")
 		}
-		srv := newTestServer(panicFetch, tokenFn("token"), storage)
+		srv := newTestServer(panicFetch, "token", storage)
 		defer srv.Close()
 
 		resp, err := http.Get(srv.URL + "/simple/tjenestespesifikasjoner/no/nav/foo/bar!/1.0/bar-1.0.jar")
@@ -486,7 +450,7 @@ func TestHandleCached(t *testing.T) {
 	t.Run("cache miss upstream 200 returns 200 and stores artifact", func(t *testing.T) {
 		storage, state := newMockStorage(false, time.Time{}, "")
 		fetch := mockFetch(publicGraphQLResponse(), artifactResponse(200, "artifact-bytes"))
-		srv := newTestServer(fetch, tokenFn("token"), storage)
+		srv := newTestServer(fetch, "token", storage)
 		defer srv.Close()
 
 		resp, err := http.Get(srv.URL + cachedPath)
@@ -526,7 +490,7 @@ func TestHandleCached(t *testing.T) {
 			}{url, headers.Clone()})
 			return fetch(ctx, url, method, headers, body)
 		}
-		srv := newTestServer(fetchWrapper, tokenFn("token"), storage)
+		srv := newTestServer(fetchWrapper, "token", storage)
 		defer srv.Close()
 
 		resp, err := http.Get(srv.URL + cachedPath)
@@ -564,7 +528,7 @@ func TestHandleCached(t *testing.T) {
 			artifactResponse(302, "", redirectHeaders),
 			artifactResponse(200, "redirected-body"),
 		)
-		srv := newTestServer(fetch, tokenFn("token"), storage)
+		srv := newTestServer(fetch, "token", storage)
 		defer srv.Close()
 
 		resp, err := http.Get(srv.URL + cachedPath)
@@ -593,7 +557,7 @@ func TestHandleCached(t *testing.T) {
 			artifactResponse(302, "", redirectHeaders),
 			artifactResponse(200, "redirected-302-body"),
 		)
-		srv := newTestServer(fetch, tokenFn("token"), storage)
+		srv := newTestServer(fetch, "token", storage)
 		defer srv.Close()
 
 		resp, err := http.Get(srv.URL + cachedPath)
@@ -622,7 +586,7 @@ func TestHandleCached(t *testing.T) {
 			artifactResponse(302, "", redirectHeaders),
 			artifactResponse(500, "server failure"),
 		)
-		srv := newTestServer(fetch, tokenFn("token"), storage)
+		srv := newTestServer(fetch, "token", storage)
 		defer srv.Close()
 
 		resp, err := http.Get(srv.URL + cachedPath)
@@ -646,7 +610,7 @@ func TestHandleCached(t *testing.T) {
 			t.Errorf("fetch should not be called on cache hit, called with %q", url)
 			return nil, fmt.Errorf("unexpected call")
 		}
-		srv := newTestServer(panicFetch, tokenFn("token"), storage)
+		srv := newTestServer(panicFetch, "token", storage)
 		defer srv.Close()
 
 		resp, err := http.Get(srv.URL + cachedPath)
@@ -671,7 +635,7 @@ func TestHandleCached(t *testing.T) {
 			t.Errorf("fetch should not be called for fresh cache, called with %q", url)
 			return nil, fmt.Errorf("unexpected call")
 		}
-		srv := newTestServer(panicFetch, tokenFn("token"), storage)
+		srv := newTestServer(panicFetch, "token", storage)
 		defer srv.Close()
 
 		resp, err := http.Get(srv.URL + cachedMetadataPath)
@@ -699,7 +663,7 @@ func TestHandleCached(t *testing.T) {
 			publicGraphQLResponse(),
 			artifactResponse(200, "refetched-metadata-body"),
 		)
-		srv := newTestServer(fetch, tokenFn("token"), storage)
+		srv := newTestServer(fetch, "token", storage)
 		defer srv.Close()
 
 		resp, err := http.Get(srv.URL + cachedMetadataPath)
@@ -729,7 +693,7 @@ func TestHandleCached(t *testing.T) {
 			t.Errorf("fetch should not be called for non-NAV packages, called with %q", url)
 			return nil, fmt.Errorf("unexpected call")
 		}
-		srv := newTestServer(panicFetch, tokenFn("token"), storage)
+		srv := newTestServer(panicFetch, "token", storage)
 		defer srv.Close()
 
 		resp, err := http.Get(srv.URL + nonNavCachedPath)
@@ -750,7 +714,7 @@ func TestHandleCached(t *testing.T) {
 	t.Run("upstream 404 maps to 404", func(t *testing.T) {
 		storage, _ := newMockStorage(false, time.Time{}, "")
 		fetch := mockFetch(publicGraphQLResponse(), artifactResponse(404, "missing"))
-		srv := newTestServer(fetch, tokenFn("token"), storage)
+		srv := newTestServer(fetch, "token", storage)
 		defer srv.Close()
 
 		resp, err := http.Get(srv.URL + cachedPath)
@@ -768,33 +732,13 @@ func TestHandleCached(t *testing.T) {
 		}
 	})
 
-	t.Run("returns 500 when token lookup throws", func(t *testing.T) {
-		storage, _ := newMockStorage(false, time.Time{}, "")
-		srv := newTestServer(mockFetch(), errorTokenFn(), storage)
-		defer srv.Close()
-
-		resp, err := http.Get(srv.URL + cachedPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != 500 {
-			t.Errorf("status = %d, want 500", resp.StatusCode)
-		}
-		body, _ := io.ReadAll(resp.Body)
-		if strings.TrimSpace(string(body)) != "Server error" {
-			t.Errorf("body = %q, want 'Server error'", body)
-		}
-	})
-
 	t.Run("returns 422 for invalid maven coordinates in cached path", func(t *testing.T) {
 		storage, _ := newMockStorage(false, time.Time{}, "")
 		panicFetch := func(ctx context.Context, url string, method string, headers http.Header, body io.Reader) (*http.Response, error) {
 			t.Errorf("fetch should not be called for invalid coordinates, called with %q", url)
 			return nil, fmt.Errorf("unexpected call")
 		}
-		srv := newTestServer(panicFetch, tokenFn("token"), storage)
+		srv := newTestServer(panicFetch, "token", storage)
 		defer srv.Close()
 
 		resp, err := http.Get(srv.URL + "/cached/tjenestespesifikasjoner/no/nav/foo/bar!/1.0/bar-1.0.jar")

@@ -8,7 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -29,14 +28,14 @@ type visibilityCacheEntry struct {
 
 type App struct {
 	Fetch           func(ctx context.Context, url string, method string, headers http.Header, body io.Reader) (*http.Response, error)
-	GetToken        func() (string, error)
 	Storage         Storage
 	Logger          *slog.Logger
+	token           string
 	visibilityMu    sync.RWMutex
 	visibilityCache map[string]*visibilityCacheEntry
 }
 
-func NewDefaultApp(storage Storage, logger *slog.Logger) *App {
+func NewDefaultApp(token string, storage Storage, logger *slog.Logger) *App {
 	client := &http.Client{
 		Timeout: 5 * time.Minute,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -53,18 +52,11 @@ func NewDefaultApp(storage Storage, logger *slog.Logger) *App {
 			req.Header = headers
 			return client.Do(req)
 		},
-		GetToken:        realGetToken,
 		Storage:         storage,
 		Logger:          logger,
+		token:           token,
 		visibilityCache: make(map[string]*visibilityCacheEntry),
 	}
-}
-
-func realGetToken() (string, error) {
-	if v := os.Getenv("GITHUB_TOKEN"); v != "" {
-		return strings.TrimSpace(v), nil
-	}
-	return "", fmt.Errorf("GITHUB_TOKEN not set")
 }
 
 func (app *App) isPackagePublic(ctx context.Context, token string, parsed Artifact, repo string) (bool, error) {
@@ -202,13 +194,6 @@ func (app *App) recoverPanic(w http.ResponseWriter) {
 }
 
 func (app *App) authorizeArtifact(w http.ResponseWriter, r *http.Request, repo, path string) (string, bool) {
-	token, err := app.GetToken()
-	if err != nil {
-		app.Logger.Error("failed to get github token", "error", err)
-		http.Error(w, "Server error", http.StatusInternalServerError)
-		return "", false
-	}
-
 	parsed, err := ParsePathAsArtifact(path)
 	if err != nil {
 		http.Error(w, "422: The file path you provided was probably invalid (not a valid Maven repository path)", http.StatusUnprocessableEntity)
@@ -227,7 +212,7 @@ func (app *App) authorizeArtifact(w http.ResponseWriter, r *http.Request, repo, 
 		return "", false
 	}
 
-	isPublic, err := app.isPackagePublicCached(r.Context(), token, parsed, repo)
+	isPublic, err := app.isPackagePublicCached(r.Context(), app.token, parsed, repo)
 	if err != nil {
 		app.Logger.Error("failed to get package visibility", "repo", repo, "path", path, "error", err)
 	}
@@ -236,7 +221,7 @@ func (app *App) authorizeArtifact(w http.ResponseWriter, r *http.Request, repo, 
 		return "", false
 	}
 
-	return token, true
+	return app.token, true
 }
 
 func (app *App) handleUpstreamError(w http.ResponseWriter, statusCode int, artifactURL string) {

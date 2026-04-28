@@ -72,7 +72,13 @@ func main() {
 		}
 	}
 
-	app := NewDefaultApp(storage, logger)
+	token := os.Getenv("GITHUB_TOKEN")
+	if token == "" {
+		logger.Error("GITHUB_TOKEN environment variable is required")
+		os.Exit(1)
+	}
+
+	app := NewDefaultApp(token, storage, logger)
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
