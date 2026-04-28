@@ -12,7 +12,7 @@ steps:
       - "--cpu"
       - "1"
       - "--memory"
-      - "256Mi"
+      - "128Mi"
       - "--concurrency"
       - "100"
       - "--timeout"
