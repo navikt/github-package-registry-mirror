@@ -95,6 +95,8 @@ func (m *mockStorageImpl) File(name string) FileHandle {
 	return &mockFileHandle{state: m.state}
 }
 
+func (m *mockStorageImpl) Ping(_ context.Context) error { return nil }
+
 func (m *mockStorageImpl) Close() error { return nil }
 
 type mockFileHandle struct {

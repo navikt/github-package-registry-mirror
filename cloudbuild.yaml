@@ -3,7 +3,7 @@ steps:
     args:
       - "run"
       - "deploy"
-      - "github-package-registry-mirror-v2"
+      - "github-package-registry-mirror"
       - "--source"
       - "."
       - "--region"
@@ -25,5 +25,8 @@ steps:
       - "cloud-run-mirror@github-package-registry-mirror.iam.gserviceaccount.com"
       - "--set-secrets"
       - "GITHUB_TOKEN=github-token:latest"
+      - "--startup-cpu-boost"
+      - "--startup-probe"
+      - "httpGet.path=/healthz,httpGet.port=8080,timeoutSeconds=3,periodSeconds=3,failureThreshold=5"
 options:
   logging: CLOUD_LOGGING_ONLY

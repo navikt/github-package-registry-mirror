@@ -53,27 +53,6 @@ resource "google_project_service" "apis" {
   service = each.value
 }
 
-resource "google_cloud_run_service" "default" {
-  name     = "github-package-registry-mirror"
-  location = local.region
-
-  template {
-    spec {
-      containers {
-        image = "eu.gcr.io/github-package-registry-mirror/github-package-registry-mirror"
-      }
-    }
-  }
-
-  lifecycle {
-    ignore_changes = [
-      traffic,
-      metadata,
-      template,
-    ]
-  }
-}
-
 resource "google_cloud_run_domain_mapping" "default" {
   location = local.region
   name     = "github-package-registry-mirror.gc.nav.no"
@@ -83,7 +62,7 @@ resource "google_cloud_run_domain_mapping" "default" {
   }
 
   spec {
-    route_name = google_cloud_run_service.default.name
+    route_name = "github-package-registry-mirror"
   }
 
   lifecycle {
@@ -91,10 +70,6 @@ resource "google_cloud_run_domain_mapping" "default" {
       metadata,
     ]
   }
-}
-
-resource "google_container_registry" "registry" {
-  location = "EU"
 }
 
 resource "google_service_account" "cloudbuild" {

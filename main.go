@@ -82,6 +82,18 @@ func main() {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		if err := storage.Ping(ctx); err != nil {
+			logger.Error("health check failed: storage", "error", err)
+			http.Error(w, "storage unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if err := app.CheckToken(ctx); err != nil {
+			logger.Error("health check failed: github token", "error", err)
+			http.Error(w, "github token invalid", http.StatusServiceUnavailable)
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("OK"))
 	})

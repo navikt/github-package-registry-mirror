@@ -85,6 +85,24 @@ func NewDefaultApp(token string, storage Storage, logger *slog.Logger) *App {
 	}
 }
 
+func (app *App) CheckToken(ctx context.Context) error {
+	headers := http.Header{}
+	headers.Set("Authorization", "bearer "+app.token)
+	resp, err := app.Fetch(ctx, "https://api.github.com/rate_limit", http.MethodGet, headers, nil)
+	if err != nil {
+		return fmt.Errorf("github token check: %w", err)
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode == http.StatusUnauthorized {
+		return fmt.Errorf("github token is invalid (401)")
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("github rate_limit returned status %d", resp.StatusCode)
+	}
+	return nil
+}
+
 func (app *App) isPackagePublic(ctx context.Context, token string, parsed Artifact, repo string) (bool, error) {
 	packageName := parsed.GroupID + "." + parsed.ArtifactID
 	query := `query($name: [String!]!) { organization(login:"navikt"){ packages(first:1,names:$name){ nodes{ repository{ name isPrivate } } } } }`

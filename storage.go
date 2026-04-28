@@ -28,6 +28,7 @@ type FileHandle interface {
 // Storage is the interface for accessing files.
 type Storage interface {
 	File(name string) FileHandle
+	Ping(ctx context.Context) error
 	Close() error
 }
 
@@ -51,6 +52,11 @@ func NewGCSStorage(bucketName string) (Storage, error) {
 
 func (g *gcsStorage) File(name string) FileHandle {
 	return &gcsFileHandle{obj: g.bucket.Object(name)}
+}
+
+func (g *gcsStorage) Ping(ctx context.Context) error {
+	_, err := g.bucket.Attrs(ctx)
+	return err
 }
 
 func (g *gcsStorage) Close() error {
@@ -108,6 +114,8 @@ func NewLocalStorage(basePath string) Storage {
 func (l *localStorage) File(name string) FileHandle {
 	return &localFileHandle{path: filepath.Join(l.basePath, name)}
 }
+
+func (l *localStorage) Ping(_ context.Context) error { return nil }
 
 func (l *localStorage) Close() error { return nil }
 
