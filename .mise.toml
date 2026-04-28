@@ -27,3 +27,8 @@ if [ -z "${GITHUB_TOKEN:-}" ]; then
 fi
 bash test/integration/run.sh
 """
+
+[tasks."test:remote"]
+description = "Resolve a Maven package through the remote v2 mirror"
+dir = "test/integration/gradle-app"
+run = 'gradle resolveDeps -PmirrorUrl=https://github-package-registry-mirror-v2-411699155494.europe-north1.run.app --no-daemon'

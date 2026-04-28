@@ -4,7 +4,9 @@ plugins {
 
 repositories {
     maven {
-        url = uri("http://localhost:${project.findProperty("mirrorPort") ?: "8080"}/cached/tjenestespesifikasjoner")
+        val mirrorUrl = project.findProperty("mirrorUrl") as String?
+            ?: "http://localhost:${project.findProperty("mirrorPort") ?: "8080"}"
+        url = uri("$mirrorUrl/cached/tjenestespesifikasjoner")
         isAllowInsecureProtocol = true
     }
     mavenCentral()
