@@ -55,7 +55,10 @@ func (g *gcsStorage) File(name string) FileHandle {
 }
 
 func (g *gcsStorage) Ping(ctx context.Context) error {
-	_, err := g.bucket.Attrs(ctx)
+	_, err := g.bucket.Object(".health-check").Attrs(ctx)
+	if errors.Is(err, storage.ErrObjectNotExist) {
+		return nil
+	}
 	return err
 }
 

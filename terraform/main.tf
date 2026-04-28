@@ -145,3 +145,68 @@ resource "google_cloudbuild_trigger" "build-trigger" {
 
   filename = "cloudbuild.yaml"
 }
+
+# --- Log-based metrics ---
+
+locals {
+  service_filter = <<-EOT
+    resource.type="cloud_run_revision"
+    resource.labels.service_name="github-package-registry-mirror"
+  EOT
+}
+
+resource "google_logging_metric" "cache_hit" {
+  name   = "mirror/cache_hit"
+  filter = <<-EOT
+    ${local.service_filter}
+    jsonPayload.msg="serving from cache"
+    jsonPayload.hit=true
+  EOT
+
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "INT64"
+  }
+}
+
+resource "google_logging_metric" "cache_miss" {
+  name   = "mirror/cache_miss"
+  filter = <<-EOT
+    ${local.service_filter}
+    jsonPayload.msg="serving from cache"
+    jsonPayload.hit=false
+  EOT
+
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "INT64"
+  }
+}
+
+resource "google_logging_metric" "upstream_error" {
+  name   = "mirror/upstream_error"
+  filter = <<-EOT
+    ${local.service_filter}
+    severity=ERROR
+    jsonPayload.msg=("failed to fetch artifact" OR "could not fetch artifact" OR "artifact too large" OR "failed to fetch and cache artifact")
+  EOT
+
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "INT64"
+  }
+}
+
+resource "google_logging_metric" "health_check_failure" {
+  name   = "mirror/health_check_failure"
+  filter = <<-EOT
+    ${local.service_filter}
+    severity=ERROR
+    jsonPayload.msg=~"^health check failed"
+  EOT
+
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "INT64"
+  }
+}

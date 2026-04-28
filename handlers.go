@@ -492,7 +492,7 @@ func (app *App) handleCached(w http.ResponseWriter, r *http.Request, repo, path 
 		}
 	}
 
-	app.Logger.Info("serving from cache", "cacheKey", cacheKey)
+	app.Logger.Info("serving from cache", "cacheKey", cacheKey, "hit", exists)
 	reader, err := app.Storage.File(cacheKey).NewReader(r.Context())
 	if err != nil {
 		app.Logger.Error("failed reading cached artifact", "cacheKey", cacheKey, "error", err)
