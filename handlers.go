@@ -25,7 +25,6 @@ var allowedRedirectHosts = map[string]bool{
 
 type visibilityCacheEntry struct {
 	isPublic  bool
-	found     bool
 	expiresAt time.Time
 }
 
@@ -87,26 +86,34 @@ func realGetToken(storage Storage) func(ctx context.Context, name string) (strin
 	}
 }
 
-func (app *App) isPackagePublic(ctx context.Context, token string, parsed Artifact, repo string) (isPublic bool, found bool, err error) {
+func (app *App) isPackagePublic(ctx context.Context, token string, parsed Artifact, repo string) (bool, error) {
 	packageName := parsed.GroupID + "." + parsed.ArtifactID
 	query := `query($name: [String!]!) { organization(login:"navikt"){ packages(first:1,names:$name){ nodes{ repository{ name isPrivate } } } } }`
-	payload, _ := json.Marshal(map[string]any{
+	payload, err := json.Marshal(map[string]any{
 		"query":     query,
 		"variables": map[string]any{"name": []string{packageName}},
 	})
-	body := bytes.NewReader(payload)
+	if err != nil {
+		return false, fmt.Errorf("marshal GraphQL request: %w", err)
+	}
+
 	headers := http.Header{}
 	headers.Set("Authorization", "bearer "+token)
-	headers.Set("Accept", "application/vnd.github.packages-preview+json")
+	headers.Set("Accept", "application/vnd.github+json")
 
-	resp, err := app.Fetch(ctx, "https://api.github.com/graphql", http.MethodPost, headers, body)
+	resp, err := app.Fetch(ctx, "https://api.github.com/graphql", http.MethodPost, headers, bytes.NewReader(payload))
 	if err != nil {
-		return false, false, err
+		return false, err
 	}
 	defer resp.Body.Close()
 
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return false, fmt.Errorf("read GraphQL response: %w", err)
+	}
+
 	if resp.StatusCode != http.StatusOK {
-		return false, false, fmt.Errorf("GitHub GraphQL API returned status %d", resp.StatusCode)
+		return false, fmt.Errorf("GitHub GraphQL API returned status %d", resp.StatusCode)
 	}
 
 	type graphQLResponse struct {
@@ -128,41 +135,45 @@ func (app *App) isPackagePublic(ctx context.Context, token string, parsed Artifa
 	}
 
 	var result graphQLResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return false, false, err
+	if err := json.Unmarshal(data, &result); err != nil {
+		return false, err
 	}
 
 	if len(result.Errors) > 0 {
-		return false, false, fmt.Errorf("GitHub GraphQL error: %s", result.Errors[0].Message)
+		return false, fmt.Errorf("GitHub GraphQL error: %s", result.Errors[0].Message)
 	}
 
 	if result.Data == nil {
-		return false, false, nil
-	}
-	if result.Data.Organization == nil {
-		return false, false, nil
-	}
-	if len(result.Data.Organization.Packages.Nodes) == 0 {
-		return false, false, nil
-	}
-	node := result.Data.Organization.Packages.Nodes[0]
-	if node.Repository == nil {
-		return false, false, nil
-	}
-	if !strings.EqualFold(node.Repository.Name, repo) {
-		app.Logger.Warn("package repository mismatch", "expected", repo, "got", node.Repository.Name)
-		return false, false, nil
-	}
-	if node.Repository.IsPrivate {
-		return false, true, nil
+		app.Logger.Warn("GraphQL response has no data field", "package", packageName)
+		return false, nil
 	}
 
-	return true, true, nil
+	if result.Data.Organization == nil {
+		app.Logger.Warn("GraphQL response has no organization — token may lack org access", "package", packageName)
+		return false, nil
+	}
+
+	nodes := result.Data.Organization.Packages.Nodes
+	if len(nodes) == 0 {
+		return false, nil
+	}
+
+	node := nodes[0]
+	if node.Repository == nil {
+		return false, nil
+	}
+
+	if !strings.EqualFold(node.Repository.Name, repo) {
+		app.Logger.Warn("package repository mismatch", "expected", repo, "got", node.Repository.Name)
+		return false, nil
+	}
+
+	return !node.Repository.IsPrivate, nil
 }
 
 const visibilityCacheTTL = 5 * time.Minute
 
-func (app *App) isPackagePublicCached(ctx context.Context, token string, parsed Artifact, repo string) (bool, bool, error) {
+func (app *App) isPackagePublicCached(ctx context.Context, token string, parsed Artifact, repo string) (bool, error) {
 	cacheKey := repo + ":" + parsed.GroupID + "." + parsed.ArtifactID
 
 	app.visibilityMu.RLock()
@@ -171,27 +182,26 @@ func (app *App) isPackagePublicCached(ctx context.Context, token string, parsed 
 
 	if ok {
 		if time.Now().Before(entry.expiresAt) {
-			return entry.isPublic, entry.found, nil
+			return entry.isPublic, nil
 		}
 		app.visibilityMu.Lock()
 		delete(app.visibilityCache, cacheKey)
 		app.visibilityMu.Unlock()
 	}
 
-	isPublic, found, err := app.isPackagePublic(ctx, token, parsed, repo)
+	isPublic, err := app.isPackagePublic(ctx, token, parsed, repo)
 	if err != nil {
-		return false, false, err
+		return false, err
 	}
 
 	app.visibilityMu.Lock()
 	app.visibilityCache[cacheKey] = &visibilityCacheEntry{
 		isPublic:  isPublic,
-		found:     found,
 		expiresAt: time.Now().Add(visibilityCacheTTL),
 	}
 	app.visibilityMu.Unlock()
 
-	return isPublic, found, nil
+	return isPublic, nil
 }
 
 func containsPathTraversal(path string) bool {
@@ -236,7 +246,7 @@ func (app *App) authorizeArtifact(w http.ResponseWriter, r *http.Request, repo, 
 		return "", false
 	}
 
-	isPublic, _, err := app.isPackagePublicCached(r.Context(), token, parsed, repo)
+	isPublic, err := app.isPackagePublicCached(r.Context(), token, parsed, repo)
 	if err != nil {
 		app.Logger.Error("failed to get package visibility", "repo", repo, "path", path, "error", err)
 	}
