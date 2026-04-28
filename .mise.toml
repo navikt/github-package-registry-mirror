@@ -1,0 +1,29 @@
+[tools]
+go = "1.26.2"
+golangci-lint = "latest"
+gradle = "8.14.4"
+java = "temurin-21"
+opentofu = "1.10.7"
+
+[tasks.test]
+description = "Run unit tests"
+run = "go test -race ./..."
+
+[tasks.check]
+description = "Run all linters and static analysis"
+run = "go run mvdan.cc/gofumpt@latest -l . && golangci-lint run && go run honnef.co/go/tools/cmd/staticcheck@latest ./... && go run golang.org/x/vuln/cmd/govulncheck@latest ./..."
+
+[tasks.run]
+description = "Run the server locally"
+run = "go run ."
+
+[tasks."test:integration"]
+description = "Run integration test (resolves a real Maven package through the mirror)"
+run = """
+if [ -z "${GITHUB_TOKEN:-}" ]; then
+    printf 'GITHUB_TOKEN not set. Enter a GitHub PAT with read:packages scope: '
+    read -r GITHUB_TOKEN
+    export GITHUB_TOKEN
+fi
+bash test/integration/run.sh
+"""
