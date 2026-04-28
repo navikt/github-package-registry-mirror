@@ -19,3 +19,7 @@ steps:
       - "900s"
       - "--max-instances"
       - "10"
+      - "--build-service-account"
+      - "projects/github-package-registry-mirror/serviceAccounts/cloudbuild-deployer@github-package-registry-mirror.iam.gserviceaccount.com"
+options:
+  logging: CLOUD_LOGGING_ONLY

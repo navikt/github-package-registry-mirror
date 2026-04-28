@@ -38,23 +38,21 @@ provider "google-beta" {
 # --- Existing resources (preserve in state) ---
 
 resource "google_storage_bucket" "mirror-cache" {
-  project  = local.project
   name     = "github-package-registry-storage"
   location = local.region
 }
 
-resource "google_project_service" "cloudbuild" {
-  project = local.project
-  service = "cloudbuild.googleapis.com"
-}
-
-resource "google_project_service" "run" {
-  project = local.project
-  service = "run.googleapis.com"
+resource "google_project_service" "apis" {
+  for_each = toset([
+    "cloudbuild.googleapis.com",
+    "iam.googleapis.com",
+    "run.googleapis.com",
+    "artifactregistry.googleapis.com",
+  ])
+  service = each.value
 }
 
 resource "google_cloud_run_service" "default" {
-  project  = local.project
   name     = "github-package-registry-mirror"
   location = local.region
 
@@ -76,7 +74,6 @@ resource "google_cloud_run_service" "default" {
 }
 
 resource "google_cloud_run_domain_mapping" "default" {
-  project  = local.project
   location = local.region
   name     = "github-package-registry-mirror.gc.nav.no"
 
@@ -96,12 +93,30 @@ resource "google_cloud_run_domain_mapping" "default" {
 }
 
 resource "google_container_registry" "registry" {
-  project  = local.project
   location = "EU"
 }
 
-resource "google_cloudbuild_trigger" "build-trigger" {
+resource "google_service_account" "cloudbuild" {
+  account_id   = "cloudbuild-deployer"
+  display_name = "Cloud Build deployer"
+  depends_on   = [google_project_service.apis]
+}
+
+resource "google_project_iam_member" "cloudbuild" {
+  for_each = toset([
+    "roles/cloudbuild.builds.builder",
+    "roles/run.admin",
+    "roles/iam.serviceAccountUser",
+    "roles/artifactregistry.admin",
+    "roles/logging.logWriter",
+  ])
   project = local.project
+  role    = each.value
+  member  = "serviceAccount:${google_service_account.cloudbuild.email}"
+}
+
+resource "google_cloudbuild_trigger" "build-trigger" {
+  service_account = google_service_account.cloudbuild.id
 
   github {
     owner = "navikt"
@@ -117,11 +132,6 @@ resource "google_cloudbuild_trigger" "build-trigger" {
 }
 
 # --- New resources ---
-
-resource "google_project_service" "artifactregistry" {
-  project = local.project
-  service = "artifactregistry.googleapis.com"
-}
 
 resource "google_cloud_run_v2_service" "go-rewrite" {
   name                = "github-package-registry-mirror-v2"
@@ -141,5 +151,5 @@ resource "google_cloud_run_v2_service" "go-rewrite" {
     ]
   }
 
-  depends_on = [google_project_service.run]
+  depends_on = [google_project_service.apis]
 }
