@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -78,6 +79,7 @@ func artifactResponse(status int, body string, headers ...http.Header) *mockResp
 
 // mockStorage creates a fake Storage implementation.
 type mockStorageState struct {
+	mu          sync.RWMutex
 	exists      bool
 	timeCreated time.Time
 	content     string
@@ -100,10 +102,14 @@ type mockFileHandle struct {
 }
 
 func (f *mockFileHandle) Exists(ctx context.Context) (bool, error) {
+	f.state.mu.RLock()
+	defer f.state.mu.RUnlock()
 	return f.state.exists, nil
 }
 
 func (f *mockFileHandle) GetMetadata(ctx context.Context) (FileMetadata, error) {
+	f.state.mu.RLock()
+	defer f.state.mu.RUnlock()
 	tc := f.state.timeCreated
 	if tc.IsZero() {
 		tc = time.Now()
@@ -112,6 +118,8 @@ func (f *mockFileHandle) GetMetadata(ctx context.Context) (FileMetadata, error) 
 }
 
 func (f *mockFileHandle) NewReader(ctx context.Context) (io.ReadCloser, error) {
+	f.state.mu.RLock()
+	defer f.state.mu.RUnlock()
 	return io.NopCloser(strings.NewReader(f.state.content)), nil
 }
 
@@ -120,8 +128,15 @@ func (f *mockFileHandle) NewWriter(ctx context.Context) (io.WriteCloser, error) 
 }
 
 func (f *mockFileHandle) Delete(ctx context.Context) error {
-	f.state.deleted = true
-	return nil
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		f.state.mu.Lock()
+		f.state.deleted = true
+		f.state.mu.Unlock()
+		return nil
+	}
 }
 
 type mockWriter struct {
@@ -134,7 +149,12 @@ func (w *mockWriter) Write(p []byte) (int, error) {
 }
 
 func (w *mockWriter) Close() error {
-	w.state.writtenData += w.buf.String()
+	data := w.buf.String()
+	w.state.mu.Lock()
+	w.state.writtenData += data
+	w.state.content = data
+	w.state.exists = true
+	w.state.mu.Unlock()
 	return nil
 }
 
@@ -152,6 +172,7 @@ func newTestServer(fetch func(ctx context.Context, url string, method string, he
 		Storage:         storage,
 		Logger:          logger,
 		token:           token,
+		maxArtifactSize: defaultMaxArtifactSize,
 		visibilityCache: make(map[string]*visibilityCacheEntry),
 	}
 	mux := http.NewServeMux()
@@ -751,4 +772,185 @@ func TestHandleCached(t *testing.T) {
 			t.Errorf("status = %d, want 422", resp.StatusCode)
 		}
 	})
+}
+
+func TestBug4_SilentArtifactTruncation(t *testing.T) {
+	const testMaxSize = 10
+	oversizedBody := strings.Repeat("x", testMaxSize+5)
+
+	storage, state := newMockStorage(false, time.Time{}, "")
+	fetch := func(ctx context.Context, url string, method string, headers http.Header, body io.Reader) (*http.Response, error) {
+		if strings.Contains(url, "graphql") {
+			return &http.Response{
+				StatusCode: 200,
+				Header:     http.Header{},
+				Body:       io.NopCloser(strings.NewReader(`{"data":{"organization":{"packages":{"nodes":[{"repository":{"name":"tjenestespesifikasjoner","isPrivate":false}}]}}}}`)),
+			}, nil
+		}
+		return &http.Response{
+			StatusCode: 200,
+			Header:     http.Header{"Content-Type": {"application/octet-stream"}},
+			Body:       io.NopCloser(strings.NewReader(oversizedBody)),
+		}, nil
+	}
+
+	logger := slog.New(slog.DiscardHandler)
+	app := &App{
+		Fetch:           fetch,
+		Storage:         storage,
+		Logger:          logger,
+		token:           "token",
+		maxArtifactSize: testMaxSize,
+		visibilityCache: make(map[string]*visibilityCacheEntry),
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /cached/{repo}/{path...}", func(w http.ResponseWriter, r *http.Request) {
+		app.handleCached(w, r, r.PathValue("repo"), r.PathValue("path"))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/cached/tjenestespesifikasjoner/no/nav/foo/bar/1.0/bar-1.0.jar")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Errorf("status = %d, want %d (oversized body should be rejected, not silently truncated)", resp.StatusCode, http.StatusBadGateway)
+	}
+
+	if !state.deleted {
+		t.Error("oversized artifact cache entry should be deleted")
+	}
+}
+
+func TestBug6_CacheCleanupUsesRequestContext(t *testing.T) {
+	storage, state := newMockStorage(false, time.Time{}, "")
+
+	app := &App{
+		Storage:         storage,
+		Logger:          slog.New(slog.DiscardHandler),
+		maxArtifactSize: 10,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := app.writeToCache(ctx, strings.NewReader(strings.Repeat("x", 15)), "cache/test/artifact.jar")
+	if err == nil {
+		t.Fatal("expected error for oversized body")
+	}
+	if !state.deleted {
+		t.Error("cache cleanup should succeed even with cancelled request context")
+	}
+}
+
+func TestBug7_UnboundedVisibilityCache(t *testing.T) {
+	storage, _ := newMockStorage(false, time.Time{}, "")
+
+	app := &App{
+		Fetch: func(ctx context.Context, url string, method string, headers http.Header, body io.Reader) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: 200,
+				Header:     http.Header{},
+				Body:       io.NopCloser(strings.NewReader(`{"data":{"organization":{"packages":{"nodes":[{"repository":{"name":"repo","isPrivate":false}}]}}}}`)),
+			}, nil
+		},
+		Storage:         storage,
+		Logger:          slog.New(slog.DiscardHandler),
+		token:           "token",
+		maxArtifactSize: defaultMaxArtifactSize,
+		visibilityCache: make(map[string]*visibilityCacheEntry),
+	}
+
+	for i := range 100 {
+		key := fmt.Sprintf("repo:no.nav.pkg%d.artifact%d", i, i)
+		app.visibilityCache[key] = &visibilityCacheEntry{
+			isPublic:  true,
+			expiresAt: time.Now().Add(-time.Hour),
+		}
+	}
+
+	if len(app.visibilityCache) != 100 {
+		t.Fatalf("setup: expected 100 entries, got %d", len(app.visibilityCache))
+	}
+
+	// Lookup one key — triggers eviction of only that key
+	_, _ = app.isPackagePublicCached(context.Background(), "token", Artifact{GroupID: "no.nav.pkg0", ArtifactID: "artifact0"}, "repo")
+
+	app.visibilityMu.RLock()
+	remaining := len(app.visibilityCache)
+	app.visibilityMu.RUnlock()
+
+	if remaining > 1 {
+		t.Errorf("visibility cache has %d entries, want at most 1 (expired entries should be proactively evicted)", remaining)
+	}
+}
+
+func TestBug8_NoCacheDeduplication(t *testing.T) {
+	storage, _ := newMockStorage(false, time.Time{}, "")
+
+	var fetchCount int64
+	var mu sync.Mutex
+
+	fetch := func(ctx context.Context, url string, method string, headers http.Header, body io.Reader) (*http.Response, error) {
+		if strings.Contains(url, "graphql") {
+			return &http.Response{
+				StatusCode: 200,
+				Header:     http.Header{},
+				Body:       io.NopCloser(strings.NewReader(`{"data":{"organization":{"packages":{"nodes":[{"repository":{"name":"tjenestespesifikasjoner","isPrivate":false}}]}}}}`)),
+			}, nil
+		}
+		mu.Lock()
+		fetchCount++
+		mu.Unlock()
+		time.Sleep(50 * time.Millisecond)
+		return &http.Response{
+			StatusCode: 200,
+			Header:     http.Header{"Content-Type": {"application/octet-stream"}},
+			Body:       io.NopCloser(strings.NewReader("artifact-content")),
+		}, nil
+	}
+
+	logger := slog.New(slog.DiscardHandler)
+	app := &App{
+		Fetch:           fetch,
+		Storage:         storage,
+		Logger:          logger,
+		token:           "token",
+		maxArtifactSize: defaultMaxArtifactSize,
+		visibilityCache: make(map[string]*visibilityCacheEntry),
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /cached/{repo}/{path...}", func(w http.ResponseWriter, r *http.Request) {
+		app.handleCached(w, r, r.PathValue("repo"), r.PathValue("path"))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	const concurrency = 10
+	var wg sync.WaitGroup
+	wg.Add(concurrency)
+	for range concurrency {
+		go func() {
+			defer wg.Done()
+			resp, err := http.Get(srv.URL + "/cached/tjenestespesifikasjoner/no/nav/foo/bar/1.0/bar-1.0.jar")
+			if err != nil {
+				t.Errorf("request failed: %v", err)
+				return
+			}
+			defer resp.Body.Close()
+			_, _ = io.ReadAll(resp.Body)
+		}()
+	}
+	wg.Wait()
+
+	mu.Lock()
+	count := fetchCount
+	mu.Unlock()
+
+	if count > 1 {
+		t.Errorf("upstream was fetched %d times for same artifact, want 1 (concurrent requests should be deduplicated)", count)
+	}
 }
