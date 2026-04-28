@@ -130,26 +130,3 @@ resource "google_cloudbuild_trigger" "build-trigger" {
 
   filename = "cloudbuild.yaml"
 }
-
-# --- New resources ---
-
-resource "google_cloud_run_v2_service" "go-rewrite" {
-  name                = "github-package-registry-mirror-v2"
-  location            = local.region
-  deletion_protection = false
-
-  template {
-    containers {
-      image = "us-docker.pkg.dev/cloudrun/container/hello"
-    }
-  }
-
-  lifecycle {
-    ignore_changes = [
-      template,
-      traffic,
-    ]
-  }
-
-  depends_on = [google_project_service.apis]
-}
